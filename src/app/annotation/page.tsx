@@ -891,16 +891,100 @@ function AnnotationPageContent() {
     }
   };
 
-  const handleExportCSV = () => {
-    // TODO: Implement CSV export
-    console.log("Exporting to CSV...");
-    alert("CSV export functionality will be implemented");
+  const handleExportCSV = async () => {
+    if (!userName || !folderName) {
+      setStatusError("Missing user or folder information");
+      return;
+    }
+
+    try {
+      setIsLoadingStatus(true);
+      setStatusError(null);
+
+      const response = await fetch(
+        `/api/export-annotations-csv?annotator=${encodeURIComponent(
+          userName
+        )}&folder=${encodeURIComponent(folderName)}`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to export annotations");
+      }
+
+      // Get the filename from the Content-Disposition header
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = contentDisposition
+        ? contentDisposition.split("filename=")[1]?.replace(/"/g, "")
+        : `${userName}_${folderName}_annotations.csv`;
+
+      // Create a blob and download it
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error("CSV Export error:", error);
+      setStatusError(error.message || "Failed to export annotations");
+    } finally {
+      setIsLoadingStatus(false);
+    }
   };
 
-  const handleExportJSON = () => {
-    // TODO: Implement JSON export
-    console.log("Exporting to JSON...");
-    alert("JSON export functionality will be implemented");
+  const handleExportJSON = async () => {
+    if (!userName || !folderName) {
+      setStatusError("Missing user or folder information");
+      return;
+    }
+
+    try {
+      setIsLoadingStatus(true);
+      setStatusError(null);
+
+      const response = await fetch(
+        `/api/export-annotations?annotator=${encodeURIComponent(
+          userName
+        )}&folder=${encodeURIComponent(folderName)}`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to export annotations");
+      }
+
+      // Get the filename from the Content-Disposition header
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = contentDisposition
+        ? contentDisposition.split("filename=")[1]?.replace(/"/g, "")
+        : `${userName}_${folderName}_annotations.json`;
+
+      // Create a blob and download it
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error("Export error:", error);
+      setStatusError(error.message || "Failed to export annotations");
+    } finally {
+      setIsLoadingStatus(false);
+    }
   };
 
   const handleClearAll = async () => {
@@ -1790,27 +1874,29 @@ function AnnotationPageContent() {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex flex-wrap gap-4 justify-center">
+              <div className="flex flex-wrap gap-3 justify-center">
                 <button
                   onClick={handleExportCSV}
-                  className="flex items-center gap-2 px-4 py-2 bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors"
+                  disabled={isLoadingStatus}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground border border-primary/20 rounded-lg font-medium hover:bg-primary/90 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
                 >
                   <Download className="w-4 h-4" />
-                  Export CSV
+                  {isLoadingStatus ? "Exporting..." : "Export CSV"}
                 </button>
 
                 <button
                   onClick={handleExportJSON}
-                  className="flex items-center gap-2 px-4 py-2 bg-accent/20 text-accent border border-accent/30 rounded-lg font-medium hover:bg-accent/30 transition-colors"
+                  disabled={isLoadingStatus}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-secondary text-secondary-foreground border border-secondary/20 rounded-lg font-medium hover:bg-secondary/80 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-secondary"
                 >
                   <FileText className="w-4 h-4" />
-                  Export JSON
+                  {isLoadingStatus ? "Exporting..." : "Export JSON"}
                 </button>
 
                 <button
                   onClick={handleClearAll}
                   disabled={isLoadingStatus}
-                  className="flex items-center gap-2 px-4 py-2 bg-destructive/20 text-destructive border border-destructive/30 rounded-lg font-medium hover:bg-destructive/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="flex items-center gap-2 px-4 py-2.5 bg-destructive text-destructive-foreground border border-destructive/20 rounded-lg font-medium hover:bg-destructive/90 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-destructive"
                 >
                   {isLoadingStatus ? (
                     <PixelLoader
