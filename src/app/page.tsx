@@ -57,9 +57,16 @@ export default function Home() {
       <LightRays />
       {/* Logo */}
       <div className="mb-5">
-        <h1 className="font-pixelify-sans text-6xl md:text-8xl font-medium text-foreground text-center">
-          memet
-        </h1>
+        <div className="flex flex-col items-center">
+          <img
+            src="/logo.png"
+            alt="Memet Logo"
+            className="w-28 h-28 md:w-36 md:h-36 -mb-4"
+          />
+          <h1 className="font-pixelify-sans text-6xl md:text-8xl font-medium text-foreground text-center">
+            memet
+          </h1>
+        </div>
         <div className="w-32 h-1 bg-gradient-to-r from-primary to-accent mx-auto mt-4 rounded-full" />
       </div>
 
@@ -71,7 +78,7 @@ export default function Home() {
             <WordRotate
               duration={2500}
               words={["Pick Your Character"]}
-              className="text-3xl md:text-4xl font-pixelify-sans text-foreground"
+              className="text-3xl md:text-4xl text-foreground"
             />
           </div>
         </div>
