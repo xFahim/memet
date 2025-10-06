@@ -19,6 +19,8 @@ import {
   XCircle,
   Eye,
   Loader2,
+  Edit,
+  Check,
 } from "lucide-react";
 import {
   PixelLoader,
@@ -32,6 +34,7 @@ import { LightRays } from "@/components/ui/light-rays";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useTesseractOCR } from "@/hooks/useTesseractOCR";
 
 // Enum types matching the database
 type RoleEnum = "hero" | "villain" | "victim" | "other";
@@ -169,8 +172,17 @@ function AnnotationPageContent() {
   }>({});
   const [gridPage, setGridPage] = useState(1);
   const [gridItemsPerPage] = useState(20); // Load 20 items at a time
-  const [isExtractingOCR, setIsExtractingOCR] = useState(false);
-  const [ocrError, setOcrError] = useState<string | null>(null);
+
+  // Use the Tesseract OCR hook
+  const {
+    extractText,
+    isProcessing: isExtractingOCR,
+    error: ocrError,
+  } = useTesseractOCR();
+
+  // OCR text editing state
+  const [isEditingOCR, setIsEditingOCR] = useState(false);
+  const [editableOCRText, setEditableOCRText] = useState("");
 
   // Get user and folder from URL parameters
   const userName = searchParams.get("user") || "";
@@ -697,30 +709,11 @@ function AnnotationPageContent() {
 
   const handleExtractOCR = async () => {
     if (!apiResponse?.image_url) {
-      setOcrError("No image URL available for OCR extraction");
       return;
     }
 
-    setIsExtractingOCR(true);
-    setOcrError(null);
-
     try {
-      const response = await fetch("/api/ocr", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          imageUrl: apiResponse.image_url,
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        console.error("OCR API Error Response:", data);
-        throw new Error(data.error || `HTTP error! status: ${response.status}`);
-      }
+      const result = await extractText(apiResponse.image_url);
 
       // Update the OCR text in the API response
       if (apiResponse?.annotation) {
@@ -728,16 +721,38 @@ function AnnotationPageContent() {
           ...apiResponse,
           annotation: {
             ...apiResponse.annotation,
-            ocr_text: data.text || "No text detected",
+            ocr_text: result.text || "No text detected",
           },
         });
       }
     } catch (error: any) {
-      console.error("OCR extraction error:", error);
-      setOcrError(error.message || "Failed to extract OCR text");
-    } finally {
-      setIsExtractingOCR(false);
+      console.error("Tesseract OCR extraction error:", error);
+      // Error is already handled by the hook
     }
+  };
+
+  const handleEditOCR = () => {
+    const currentOCRText = apiResponse?.annotation?.ocr_text || "";
+    setEditableOCRText(currentOCRText);
+    setIsEditingOCR(true);
+  };
+
+  const handleSaveOCR = () => {
+    if (apiResponse?.annotation) {
+      setApiResponse({
+        ...apiResponse,
+        annotation: {
+          ...apiResponse.annotation,
+          ocr_text: editableOCRText,
+        },
+      });
+    }
+    setIsEditingOCR(false);
+  };
+
+  const handleCancelOCR = () => {
+    setEditableOCRText("");
+    setIsEditingOCR(false);
   };
 
   const getStatusColor = (status: string) => {
@@ -888,14 +903,83 @@ function AnnotationPageContent() {
     alert("JSON export functionality will be implemented");
   };
 
-  const handleClearAll = () => {
-    // TODO: Implement clear all functionality
+  const handleClearAll = async () => {
+    if (!userName || !folderName) {
+      setStatusError("Missing user or folder information");
+      return;
+    }
+
     const confirmed = window.confirm(
-      "Are you sure you want to clear all annotation records? This action cannot be undone."
+      `Are you sure you want to clear all your annotation data for folder "${folderName}"?\n\nThis will:\n• Reset all your memes to "pending" status\n• Remove all your annotation text (OCR, descriptions, explanations)\n• Keep the meme assignments and system data\n\nThis action cannot be undone.`
     );
-    if (confirmed) {
-      console.log("Clearing all annotations...");
-      alert("Clear all functionality will be implemented");
+
+    if (!confirmed) {
+      return;
+    }
+
+    setIsLoadingStatus(true);
+    setStatusError(null);
+
+    try {
+      const response = await fetch("/api/clear-annotations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          annotator_name: userName,
+          folder_name: folderName,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        const errorMessage =
+          data.error || `HTTP error! status: ${response.status}`;
+        const availableAnnotators = data.availableAnnotators;
+
+        if (availableAnnotators && availableAnnotators.length > 0) {
+          throw new Error(
+            `${errorMessage}\n\nAvailable annotators: ${availableAnnotators.join(
+              ", "
+            )}`
+          );
+        } else {
+          throw new Error(errorMessage);
+        }
+      }
+
+      // Show success message
+      alert(
+        `Successfully cleared annotations! All your memes have been reset to pending status, and the first meme is now ready for annotation.`
+      );
+
+      // Refresh the status data to reflect the changes
+      await fetchStatusData(statusFilter, true); // Force refresh
+
+      // If we're currently viewing an annotation, clear it
+      if (apiResponse?.annotation) {
+        setApiResponse(null);
+        setFormData({
+          image_description: "",
+          entity: "",
+          role: "",
+          role_explanation: "",
+          humor_explanation: "",
+          context: "",
+          domain: "",
+        });
+        setValidationErrors({});
+        setSelectedAnnotationId(null);
+      }
+    } catch (error: any) {
+      console.error("Error clearing annotations:", error);
+      setStatusError(
+        error.message || "Failed to clear annotations. Please try again."
+      );
+    } finally {
+      setIsLoadingStatus(false);
     }
   };
 
@@ -1000,7 +1084,7 @@ function AnnotationPageContent() {
           {/* Tab Content */}
           {activeTab === "workspace" && (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Left Side - Image and Static Fields */}
+              {/* Left Side - Image and Guidelines */}
               <div className="space-y-6">
                 {/* Image Display */}
                 <div className="bg-card/50 rounded-lg border p-6">
@@ -1060,32 +1144,85 @@ function AnnotationPageContent() {
                   <div className="space-y-2">
                     <div className="flex items-center justify-between">
                       <h3 className="font-semibold text-foreground">
-                        OCR Text:
+                        Bangla OCR Text:
                       </h3>
-                      <button
-                        onClick={handleExtractOCR}
-                        disabled={isExtractingOCR || !apiResponse?.image_url}
-                        className="flex items-center gap-2 px-3 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isExtractingOCR ? (
-                          <PixelLoader
-                            message="Extracting text..."
-                            size="sm"
-                            variant="dots"
-                          />
-                        ) : (
-                          <>
-                            <FileText className="w-3 h-3" />
-                            Extract OCR
-                          </>
+                      <div className="flex items-center gap-2">
+                        {!isEditingOCR && (
+                          <button
+                            onClick={handleEditOCR}
+                            className="flex items-center gap-2 px-3 py-1 text-xs bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg font-medium hover:bg-blue-500/30 transition-colors"
+                          >
+                            <Edit className="w-3 h-3" />
+                            Edit
+                          </button>
                         )}
-                      </button>
+                        <button
+                          onClick={handleExtractOCR}
+                          disabled={isExtractingOCR || !apiResponse?.image_url}
+                          className="flex items-center gap-2 px-3 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isExtractingOCR ? (
+                            <PixelLoader
+                              message="Extracting Bangla text..."
+                              size="sm"
+                              variant="dots"
+                            />
+                          ) : (
+                            <>
+                              <FileText className="w-3 h-3" />
+                              Extract Bangla OCR
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
-                    <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded min-h-[60px]">
-                      {apiResponse?.annotation?.ocr_text ||
-                        mockImageData.ocr_text ||
-                        "No OCR text available"}
-                    </p>
+
+                    {isEditingOCR ? (
+                      <div className="space-y-2">
+                        <textarea
+                          value={editableOCRText}
+                          onChange={(e) => setEditableOCRText(e.target.value)}
+                          placeholder="Edit the OCR text here..."
+                          className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] resize-y"
+                          rows={4}
+                        />
+                        <div className="flex gap-2">
+                          <button
+                            onClick={handleSaveOCR}
+                            className="flex items-center gap-2 px-3 py-1 text-xs bg-green-500/20 text-green-500 border border-green-500/30 rounded-lg font-medium hover:bg-green-500/30 transition-colors"
+                          >
+                            <Check className="w-3 h-3" />
+                            Save
+                          </button>
+                          <button
+                            onClick={handleCancelOCR}
+                            className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-500/20 text-gray-500 border border-gray-500/30 rounded-lg font-medium hover:bg-gray-500/30 transition-colors"
+                          >
+                            <X className="w-3 h-3" />
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative group">
+                        <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded min-h-[60px]">
+                          {apiResponse?.annotation?.ocr_text ||
+                            mockImageData.ocr_text ||
+                            "No OCR text available"}
+                        </p>
+                        {apiResponse?.annotation?.ocr_text && (
+                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={handleEditOCR}
+                              className="p-1 bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+                            >
+                              <Edit className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     {ocrError && (
                       <div className="p-2 bg-red-500/20 border border-red-500/30 rounded-lg">
                         <p className="text-xs text-red-500">
@@ -1101,79 +1238,63 @@ function AnnotationPageContent() {
                       <p className="text-sm text-red-500">Error: {apiError}</p>
                     </div>
                   )}
-
-                  {/* Annotation Status Info */}
-                  {apiResponse?.annotation && (
-                    <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
-                      <h4 className="font-semibold text-blue-500 mb-2">
-                        Annotation Status
-                        {selectedAnnotationId && (
-                          <span className="ml-2 text-xs bg-primary/20 text-primary px-2 py-1 rounded-full">
-                            Selected from table
-                          </span>
-                        )}
-                      </h4>
-                      <div className="space-y-1 text-sm">
-                        <p>
-                          <span className="font-medium">Status:</span>
-                          <span
-                            className={`ml-2 px-2 py-1 rounded-full text-xs ${
-                              apiResponse.annotation.annotation_status ===
-                              "in_progress"
-                                ? "bg-blue-500/20 text-blue-500"
-                                : apiResponse.annotation.annotation_status ===
-                                  "completed"
-                                ? "bg-green-500/20 text-green-500"
-                                : apiResponse.annotation.annotation_status ===
-                                  "reviewed"
-                                ? "bg-purple-500/20 text-purple-500"
-                                : "bg-gray-500/20 text-gray-500"
-                            }`}
-                          >
-                            {apiResponse.annotation.annotation_status.replace(
-                              "_",
-                              " "
-                            )}
-                          </span>
-                        </p>
-                        <p>
-                          <span className="font-medium">Image ID:</span>{" "}
-                          {apiResponse.annotation.image_id}
-                        </p>
-                        <p>
-                          <span className="font-medium">Annotation ID:</span>{" "}
-                          {apiResponse.annotation.id}
-                        </p>
-                        {apiResponse.annotation.in_progress_at && (
-                          <p>
-                            <span className="font-medium">Started:</span>{" "}
-                            {new Date(
-                              apiResponse.annotation.in_progress_at
-                            ).toLocaleString()}
-                          </p>
-                        )}
-                        {apiResponse.annotation.updated_at && (
-                          <p>
-                            <span className="font-medium">Last Updated:</span>{" "}
-                            {new Date(
-                              apiResponse.annotation.updated_at
-                            ).toLocaleString()}
-                          </p>
-                        )}
-                        {apiResponse.annotation.image_description && (
-                          <p>
-                            <span className="font-medium">
-                              Previous Description:
-                            </span>{" "}
-                            {apiResponse.annotation.image_description}
-                          </p>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
 
-                {/* Static Fields and Combo Boxes */}
+                {/* Annotation Guidelines */}
+                <div className="bg-card/50 rounded-lg border p-6">
+                  <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Annotation Guidelines
+                  </h3>
+
+                  <div className="space-y-3 text-sm">
+                    {/* Role Explanation Format */}
+                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                      <h4 className="font-bold text-blue-500 mb-1">
+                        📝 Role Explanation
+                      </h4>
+                      <p className="text-muted-foreground">
+                        Format:{" "}
+                        <span className="font-bold text-foreground">
+                          [Entity] [Action/Concept] [Brief Description]
+                        </span>
+                      </p>
+                    </div>
+
+                    {/* Humor Explanation Format */}
+                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                      <h4 className="font-bold text-yellow-500 mb-1">
+                        😄 Humor Explanation
+                      </h4>
+                      <p className="text-muted-foreground">
+                        Format:{" "}
+                        <span className="font-bold text-foreground">
+                          [Humor Type or Device] [Target/Entity] [Reason for
+                          Humor]
+                        </span>
+                      </p>
+                    </div>
+
+                    {/* Context Format */}
+                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                      <h4 className="font-bold text-green-500 mb-1">
+                        🌍 Context
+                      </h4>
+                      <p className="text-muted-foreground">
+                        Format:{" "}
+                        <span className="font-bold text-foreground">
+                          [Entity/Event] [Situation/Background] [Relevance to
+                          Meme]
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Right Side - Quick Info and Detailed Explanations */}
+              <div className="space-y-6">
+                {/* Quick Info Section - Moved to top right */}
                 <div className="bg-card/50 rounded-lg border p-6 space-y-4">
                   <h3 className="text-lg font-bold text-foreground mb-4">
                     Quick Info
@@ -1273,183 +1394,183 @@ function AnnotationPageContent() {
                     )}
                   </div>
                 </div>
-              </div>
 
-              {/* Right Side - Detailed Explanations */}
-              <div className="space-y-4">
-                {/* Success Message */}
-                {saveSuccess && (
-                  <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                      <p className="text-sm text-green-500 font-medium">
-                        {selectedAnnotationId
-                          ? "Annotation skipped! Loading next annotation... ⏭️"
-                          : "Annotation saved successfully! 🎉"}
-                      </p>
+                {/* Detailed Explanations */}
+                <div className="space-y-4">
+                  {/* Success Message */}
+                  {saveSuccess && (
+                    <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                        <p className="text-sm text-green-500 font-medium">
+                          {selectedAnnotationId
+                            ? "Annotation skipped! Loading next annotation... ⏭️"
+                            : "Annotation saved successfully! 🎉"}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                {/* Error Message */}
-                {saveError && (
-                  <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                      <p className="text-sm text-red-500 font-medium">
-                        {saveError}
-                      </p>
+                  {/* Error Message */}
+                  {saveError && (
+                    <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
+                      <div className="flex items-center gap-2">
+                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                        <p className="text-sm text-red-500 font-medium">
+                          {saveError}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  {/* Image Description */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Image Description *
-                    </label>
-                    <textarea
-                      value={formData.image_description}
-                      onChange={(e) =>
-                        handleInputChange("image_description", e.target.value)
-                      }
-                      placeholder="Describe what you see in the image..."
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.image_description
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
-                      }`}
-                      rows={4}
-                      required
-                    />
-                    {validationErrors.image_description && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.image_description}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Role Explanation */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Role Explanation *
-                    </label>
-                    <textarea
-                      value={formData.role_explanation}
-                      onChange={(e) =>
-                        handleInputChange("role_explanation", e.target.value)
-                      }
-                      placeholder="Explain why this entity has this role..."
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.role_explanation
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
-                      }`}
-                      rows={4}
-                      required
-                    />
-                    {validationErrors.role_explanation && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.role_explanation}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Humor Explanation */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Humor Explanation *
-                    </label>
-                    <textarea
-                      value={formData.humor_explanation}
-                      onChange={(e) =>
-                        handleInputChange("humor_explanation", e.target.value)
-                      }
-                      placeholder="What makes this meme funny? Explain the humor..."
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.humor_explanation
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
-                      }`}
-                      rows={4}
-                      required
-                    />
-                    {validationErrors.humor_explanation && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.humor_explanation}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Context */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Context *
-                    </label>
-                    <textarea
-                      value={formData.context}
-                      onChange={(e) =>
-                        handleInputChange("context", e.target.value)
-                      }
-                      placeholder="What is the broader context or background?"
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.context
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
-                      }`}
-                      rows={4}
-                      required
-                    />
-                    {validationErrors.context && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.context}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex gap-4 pt-4">
-                    <button
-                      type="submit"
-                      disabled={isSubmitting}
-                      className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSubmitting ? (
-                        <PixelLoader
-                          message="Saving..."
-                          size="sm"
-                          variant="pulse"
-                        />
-                      ) : (
-                        <>
-                          <Save className="w-4 h-4" />
-                          Save Annotation
-                        </>
+                  <form onSubmit={handleSubmit} className="space-y-6">
+                    {/* Image Description */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        Image Description *
+                      </label>
+                      <textarea
+                        value={formData.image_description}
+                        onChange={(e) =>
+                          handleInputChange("image_description", e.target.value)
+                        }
+                        placeholder="Describe what you see in the image..."
+                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                          validationErrors.image_description
+                            ? "border-red-500 focus:ring-red-500"
+                            : "border-border focus:ring-primary"
+                        }`}
+                        rows={4}
+                        required
+                      />
+                      {validationErrors.image_description && (
+                        <p className="text-sm text-red-500">
+                          {validationErrors.image_description}
+                        </p>
                       )}
-                    </button>
+                    </div>
 
-                    <button
-                      type="button"
-                      onClick={handleSkip}
-                      disabled={isSubmitting}
-                      className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {isSubmitting ? (
-                        <PixelLoader
-                          message="Skipping..."
-                          size="sm"
-                          variant="dots"
-                        />
-                      ) : (
-                        <>
-                          <SkipForward className="w-4 h-4" />
-                          Skip
-                        </>
+                    {/* Role Explanation */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        Role Explanation *
+                      </label>
+                      <textarea
+                        value={formData.role_explanation}
+                        onChange={(e) =>
+                          handleInputChange("role_explanation", e.target.value)
+                        }
+                        placeholder="Explain why this entity has this role..."
+                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                          validationErrors.role_explanation
+                            ? "border-red-500 focus:ring-red-500"
+                            : "border-border focus:ring-primary"
+                        }`}
+                        rows={4}
+                        required
+                      />
+                      {validationErrors.role_explanation && (
+                        <p className="text-sm text-red-500">
+                          {validationErrors.role_explanation}
+                        </p>
                       )}
-                    </button>
-                  </div>
-                </form>
+                    </div>
+
+                    {/* Humor Explanation */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        Humor Explanation *
+                      </label>
+                      <textarea
+                        value={formData.humor_explanation}
+                        onChange={(e) =>
+                          handleInputChange("humor_explanation", e.target.value)
+                        }
+                        placeholder="What makes this meme funny? Explain the humor..."
+                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                          validationErrors.humor_explanation
+                            ? "border-red-500 focus:ring-red-500"
+                            : "border-border focus:ring-primary"
+                        }`}
+                        rows={4}
+                        required
+                      />
+                      {validationErrors.humor_explanation && (
+                        <p className="text-sm text-red-500">
+                          {validationErrors.humor_explanation}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Context */}
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-foreground">
+                        Context *
+                      </label>
+                      <textarea
+                        value={formData.context}
+                        onChange={(e) =>
+                          handleInputChange("context", e.target.value)
+                        }
+                        placeholder="What is the broader context or background?"
+                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                          validationErrors.context
+                            ? "border-red-500 focus:ring-red-500"
+                            : "border-border focus:ring-primary"
+                        }`}
+                        rows={4}
+                        required
+                      />
+                      {validationErrors.context && (
+                        <p className="text-sm text-red-500">
+                          {validationErrors.context}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex gap-4 pt-4">
+                      <button
+                        type="submit"
+                        disabled={isSubmitting}
+                        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSubmitting ? (
+                          <PixelLoader
+                            message="Saving..."
+                            size="sm"
+                            variant="pulse"
+                          />
+                        ) : (
+                          <>
+                            <Save className="w-4 h-4" />
+                            Save Annotation
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSkip}
+                        disabled={isSubmitting}
+                        className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {isSubmitting ? (
+                          <PixelLoader
+                            message="Skipping..."
+                            size="sm"
+                            variant="dots"
+                          />
+                        ) : (
+                          <>
+                            <SkipForward className="w-4 h-4" />
+                            Skip
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  </form>
+                </div>
               </div>
             </div>
           )}
@@ -1688,10 +1809,21 @@ function AnnotationPageContent() {
 
                 <button
                   onClick={handleClearAll}
-                  className="flex items-center gap-2 px-4 py-2 bg-destructive/20 text-destructive border border-destructive/30 rounded-lg font-medium hover:bg-destructive/30 transition-colors"
+                  disabled={isLoadingStatus}
+                  className="flex items-center gap-2 px-4 py-2 bg-destructive/20 text-destructive border border-destructive/30 rounded-lg font-medium hover:bg-destructive/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <Trash2 className="w-4 h-4" />
-                  Clear All
+                  {isLoadingStatus ? (
+                    <PixelLoader
+                      message="Clearing..."
+                      size="sm"
+                      variant="dots"
+                    />
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      Clear All
+                    </>
+                  )}
                 </button>
               </div>
             </div>
