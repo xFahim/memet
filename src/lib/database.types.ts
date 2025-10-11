@@ -69,6 +69,9 @@ export interface Database {
           entity: string | null;
           role: "hero" | "villain" | "victim" | "other" | null;
           role_explanation: string | null;
+          entity_2: string | null;
+          role_2: "hero" | "villain" | "victim" | "other" | null;
+          role_explanation_2: string | null;
           humor_explanation: string | null;
           context: string | null;
           domain:
@@ -104,6 +107,9 @@ export interface Database {
           entity?: string | null;
           role?: "hero" | "villain" | "victim" | "other" | null;
           role_explanation?: string | null;
+          entity_2?: string | null;
+          role_2?: "hero" | "villain" | "victim" | "other" | null;
+          role_explanation_2?: string | null;
           humor_explanation?: string | null;
           context?: string | null;
           domain?:
@@ -139,6 +145,9 @@ export interface Database {
           entity?: string | null;
           role?: "hero" | "villain" | "victim" | "other" | null;
           role_explanation?: string | null;
+          entity_2?: string | null;
+          role_2?: "hero" | "villain" | "victim" | "other" | null;
+          role_explanation_2?: string | null;
           humor_explanation?: string | null;
           context?: string | null;
           domain?:

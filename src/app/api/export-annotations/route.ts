@@ -57,7 +57,7 @@ export async function GET(req: Request) {
     const { data: annotations, error: fetchErr } = await supabase
       .from("annotations")
       .select(
-        "image_id, image_path, folder_id, assigned_to, ocr_text, entity, role, role_explanation, humor_explanation, context, domain, image_description"
+        "image_id, image_path, folder_id, assigned_to, ocr_text, entity, role, role_explanation, entity_2, role_2, role_explanation_2, humor_explanation, context, domain, image_description"
       )
       .eq("assigned_to", annotator.id)
       .eq("folder_id", folder.id)

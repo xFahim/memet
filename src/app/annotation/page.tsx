@@ -55,6 +55,9 @@ interface AnnotationFormData {
   entity: string;
   role: RoleEnum | "";
   role_explanation: string;
+  entity_2: string;
+  role_2: RoleEnum | "";
+  role_explanation_2: string;
   humor_explanation: string;
   context: string;
   domain: DomainEnum | "";
@@ -142,6 +145,9 @@ function AnnotationPageContent() {
     entity: "",
     role: "",
     role_explanation: "",
+    entity_2: "",
+    role_2: "",
+    role_explanation_2: "",
     humor_explanation: "",
     context: "",
     domain: "",
@@ -152,6 +158,7 @@ function AnnotationPageContent() {
   const [activeTab, setActiveTab] = useState<"workspace" | "status" | "grid">(
     "workspace"
   );
+  const [formTab, setFormTab] = useState<"entities" | "analysis">("entities");
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -370,6 +377,9 @@ function AnnotationPageContent() {
         entity: annotation.entity || "",
         role: annotation.role || "",
         role_explanation: annotation.role_explanation || "",
+        entity_2: annotation.entity_2 || "",
+        role_2: annotation.role_2 || "",
+        role_explanation_2: annotation.role_explanation_2 || "",
         humor_explanation: annotation.humor_explanation || "",
         context: annotation.context || "",
         domain: annotation.domain || "",
@@ -426,7 +436,50 @@ function AnnotationPageContent() {
     }
   };
 
-  // Validation function
+  // Validation functions for each tab
+  const validateEntitiesTab = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.entity.trim()) {
+      errors.entity = "Entity is required";
+    }
+
+    if (!formData.role) {
+      errors.role = "Role is required";
+    }
+
+    if (!formData.role_explanation.trim()) {
+      errors.role_explanation = "Role explanation is required";
+    }
+
+    if (!formData.domain) {
+      errors.domain = "Domain is required";
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const validateAnalysisTab = (): boolean => {
+    const errors: Record<string, string> = {};
+
+    if (!formData.image_description.trim()) {
+      errors.image_description = "Image description is required";
+    }
+
+    if (!formData.humor_explanation.trim()) {
+      errors.humor_explanation = "Humor explanation is required";
+    }
+
+    if (!formData.context.trim()) {
+      errors.context = "Context is required";
+    }
+
+    setValidationErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  // Full form validation
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -460,6 +513,21 @@ function AnnotationPageContent() {
 
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
+  };
+
+  // Tab navigation handlers
+  const handleNextTab = () => {
+    if (formTab === "entities") {
+      if (validateEntitiesTab()) {
+        setFormTab("analysis");
+      }
+    }
+  };
+
+  const handlePreviousTab = () => {
+    if (formTab === "analysis") {
+      setFormTab("entities");
+    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -500,6 +568,9 @@ function AnnotationPageContent() {
           entity: formData.entity,
           role: formData.role,
           role_explanation: formData.role_explanation,
+          entity_2: formData.entity_2,
+          role_2: formData.role_2,
+          role_explanation_2: formData.role_explanation_2,
           humor_explanation: formData.humor_explanation,
           context: formData.context,
           domain: formData.domain,
@@ -522,6 +593,9 @@ function AnnotationPageContent() {
         entity: "",
         role: "",
         role_explanation: "",
+        entity_2: "",
+        role_2: "",
+        role_explanation_2: "",
         humor_explanation: "",
         context: "",
         domain: "",
@@ -1050,6 +1124,9 @@ function AnnotationPageContent() {
           entity: "",
           role: "",
           role_explanation: "",
+          entity_2: "",
+          role_2: "",
+          role_explanation_2: "",
           humor_explanation: "",
           context: "",
           domain: "",
@@ -1376,285 +1453,478 @@ function AnnotationPageContent() {
                 </div>
               </div>
 
-              {/* Right Side - Quick Info and Detailed Explanations */}
+              {/* Right Side - Tabbed Form Interface */}
               <div className="space-y-6">
-                {/* Quick Info Section - Moved to top right */}
-                <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                  <h3 className="text-lg font-bold text-foreground mb-4">
-                    Quick Info
-                  </h3>
-
-                  {/* Entity */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Entity *
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.entity}
-                      onChange={(e) =>
-                        handleInputChange("entity", e.target.value)
-                      }
-                      placeholder="Who or what is the main subject?"
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.entity
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
+                {/* Form Tab Navigation */}
+                <div className="bg-card/50 rounded-lg border p-1">
+                  <div className="flex">
+                    <button
+                      onClick={() => setFormTab("entities")}
+                      className={`flex-1 px-4 py-3 rounded-md font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
+                        formTab === "entities"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
-                      required
-                    />
-                    {validationErrors.entity && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.entity}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Role */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Role *
-                    </label>
-                    <select
-                      value={formData.role}
-                      onChange={(e) =>
-                        handleInputChange("role", e.target.value as RoleEnum)
-                      }
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.role
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
-                      }`}
-                      required
                     >
-                      <option value="">Select a role...</option>
-                      <option value="hero">Hero</option>
-                      <option value="villain">Villain</option>
-                      <option value="victim">Victim</option>
-                      <option value="other">Other</option>
-                    </select>
-                    {validationErrors.role && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.role}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Domain */}
-                  <div className="space-y-2">
-                    <label className="text-sm font-medium text-foreground">
-                      Domain *
-                    </label>
-                    <select
-                      value={formData.domain}
-                      onChange={(e) =>
-                        handleInputChange(
-                          "domain",
-                          e.target.value as DomainEnum
-                        )
-                      }
-                      className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
-                        validationErrors.domain
-                          ? "border-red-500 focus:ring-red-500"
-                          : "border-border focus:ring-primary"
+                      <div className="w-2 h-2 bg-primary rounded-full"></div>
+                      Entity Details
+                    </button>
+                    <button
+                      onClick={() => setFormTab("analysis")}
+                      className={`flex-1 px-4 py-3 rounded-md font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
+                        formTab === "analysis"
+                          ? "bg-primary text-primary-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
-                      required
                     >
-                      <option value="">Select a domain...</option>
-                      <option value="politics">Politics</option>
-                      <option value="education">Education</option>
-                      <option value="health">Health</option>
-                      <option value="religion">Religion</option>
-                      <option value="society">Society</option>
-                      <option value="pop_culture">Pop Culture</option>
-                      <option value="economy">Economy</option>
-                      <option value="environment">Environment</option>
-                      <option value="others">Others</option>
-                    </select>
-                    {validationErrors.domain && (
-                      <p className="text-sm text-red-500">
-                        {validationErrors.domain}
-                      </p>
-                    )}
+                      <div className="w-2 h-2 bg-accent rounded-full"></div>
+                      Analysis
+                    </button>
                   </div>
                 </div>
 
-                {/* Detailed Explanations */}
-                <div className="space-y-4">
-                  {/* Success Message */}
-                  {saveSuccess && (
-                    <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                        <p className="text-sm text-green-500 font-medium">
-                          {selectedAnnotationId
-                            ? "Annotation skipped! Loading next annotation... ⏭️"
-                            : "Annotation saved successfully! 🎉"}
-                        </p>
+                {/* Success/Error Messages */}
+                {saveSuccess && (
+                  <div className="p-4 bg-green-500/20 border border-green-500/30 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      <p className="text-sm text-green-500 font-medium">
+                        {selectedAnnotationId
+                          ? "Annotation skipped! Loading next annotation... ⏭️"
+                          : "Annotation saved successfully! 🎉"}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {saveError && (
+                  <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                      <p className="text-sm text-red-500 font-medium">
+                        {saveError}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Form Content */}
+                <form onSubmit={handleSubmit} className="space-y-6">
+                  {/* Entity Details Tab */}
+                  {formTab === "entities" && (
+                    <div className="space-y-6">
+                      {/* Primary Entity Section */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-primary rounded-full"></div>
+                          Primary Entity
+                        </h3>
+
+                        {/* Entity */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Entity *
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.entity}
+                            onChange={(e) =>
+                              handleInputChange("entity", e.target.value)
+                            }
+                            placeholder="Who or what is the main subject?"
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.entity
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            required
+                          />
+                          {validationErrors.entity && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.entity}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Role */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Role *
+                          </label>
+                          <select
+                            value={formData.role}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "role",
+                                e.target.value as RoleEnum
+                              )
+                            }
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.role
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            required
+                          >
+                            <option value="">Select a role...</option>
+                            <option value="hero">Hero</option>
+                            <option value="villain">Villain</option>
+                            <option value="victim">Victim</option>
+                            <option value="other">Other</option>
+                          </select>
+                          {validationErrors.role && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.role}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Role Explanation */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Role Explanation *
+                          </label>
+                          <textarea
+                            value={formData.role_explanation}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "role_explanation",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Explain why this entity has this role..."
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.role_explanation
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={4}
+                            required
+                          />
+                          {validationErrors.role_explanation && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.role_explanation}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Secondary Entity Section */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-secondary rounded-full"></div>
+                          Secondary Entity
+                        </h3>
+
+                        {/* Entity 2 */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Secondary Entity
+                          </label>
+                          <input
+                            type="text"
+                            value={formData.entity_2}
+                            onChange={(e) =>
+                              handleInputChange("entity_2", e.target.value)
+                            }
+                            placeholder="Second entity or subject (optional)"
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.entity_2
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                          />
+                          {validationErrors.entity_2 && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.entity_2}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Role 2 */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Secondary Entity's Role
+                          </label>
+                          <select
+                            value={formData.role_2}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "role_2",
+                                e.target.value as RoleEnum
+                              )
+                            }
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.role_2
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                          >
+                            <option value="">Select a role...</option>
+                            <option value="hero">Hero</option>
+                            <option value="villain">Villain</option>
+                            <option value="victim">Victim</option>
+                            <option value="other">Other</option>
+                          </select>
+                          {validationErrors.role_2 && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.role_2}
+                            </p>
+                          )}
+                        </div>
+
+                        {/* Secondary Role Explanation */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Secondary Entity's Explanation
+                          </label>
+                          <textarea
+                            value={formData.role_explanation_2}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "role_explanation_2",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Explain why the secondary entity has this role..."
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.role_explanation_2
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={4}
+                          />
+                          {validationErrors.role_explanation_2 && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.role_explanation_2}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Domain Section */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-accent rounded-full"></div>
+                          Classification
+                        </h3>
+
+                        {/* Domain */}
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Domain *
+                          </label>
+                          <select
+                            value={formData.domain}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "domain",
+                                e.target.value as DomainEnum
+                              )
+                            }
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.domain
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            required
+                          >
+                            <option value="">Select a domain...</option>
+                            <option value="politics">Politics</option>
+                            <option value="education">Education</option>
+                            <option value="health">Health</option>
+                            <option value="religion">Religion</option>
+                            <option value="society">Society</option>
+                            <option value="pop_culture">Pop Culture</option>
+                            <option value="economy">Economy</option>
+                            <option value="environment">Environment</option>
+                            <option value="others">Others</option>
+                          </select>
+                          {validationErrors.domain && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.domain}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Tab Navigation Buttons */}
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          onClick={handleNextTab}
+                          className="flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
+                        >
+                          Next: Analysis
+                          <ArrowLeft className="w-4 h-4 rotate-180" />
+                        </button>
                       </div>
                     </div>
                   )}
 
-                  {/* Error Message */}
-                  {saveError && (
-                    <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                        <p className="text-sm text-red-500 font-medium">
-                          {saveError}
-                        </p>
+                  {/* Analysis Tab */}
+                  {formTab === "analysis" && (
+                    <div className="space-y-6">
+                      {/* Image Description */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-accent rounded-full"></div>
+                          Image Analysis
+                        </h3>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Image Description *
+                          </label>
+                          <textarea
+                            value={formData.image_description}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "image_description",
+                                e.target.value
+                              )
+                            }
+                            placeholder="Describe what you see in the image..."
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.image_description
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={4}
+                            required
+                          />
+                          {validationErrors.image_description && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.image_description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Humor Explanation */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                          Humor Analysis
+                        </h3>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Humor Explanation *
+                          </label>
+                          <textarea
+                            value={formData.humor_explanation}
+                            onChange={(e) =>
+                              handleInputChange(
+                                "humor_explanation",
+                                e.target.value
+                              )
+                            }
+                            placeholder="What makes this meme funny? Explain the humor..."
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.humor_explanation
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={4}
+                            required
+                          />
+                          {validationErrors.humor_explanation && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.humor_explanation}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Context */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          Context Analysis
+                        </h3>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Context *
+                          </label>
+                          <textarea
+                            value={formData.context}
+                            onChange={(e) =>
+                              handleInputChange("context", e.target.value)
+                            }
+                            placeholder="What is the broader context or background?"
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.context
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={4}
+                            required
+                          />
+                          {validationErrors.context && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.context}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Tab Navigation and Submit Buttons */}
+                      <div className="flex justify-between">
+                        <button
+                          type="button"
+                          onClick={handlePreviousTab}
+                          className="flex items-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors"
+                        >
+                          <ArrowLeft className="w-4 h-4" />
+                          Back: Entity Details
+                        </button>
+
+                        <div className="flex gap-4">
+                          <button
+                            type="button"
+                            onClick={handleSkip}
+                            disabled={isSubmitting}
+                            className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isSubmitting ? (
+                              <PixelLoader
+                                message="Skipping..."
+                                size="sm"
+                                variant="dots"
+                              />
+                            ) : (
+                              <>
+                                <SkipForward className="w-4 h-4" />
+                                Skip
+                              </>
+                            )}
+                          </button>
+
+                          <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {isSubmitting ? (
+                              <PixelLoader
+                                message="Saving..."
+                                size="sm"
+                                variant="pulse"
+                              />
+                            ) : (
+                              <>
+                                <Save className="w-4 h-4" />
+                                Save Annotation
+                              </>
+                            )}
+                          </button>
+                        </div>
                       </div>
                     </div>
                   )}
-
-                  <form onSubmit={handleSubmit} className="space-y-6">
-                    {/* Image Description */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Image Description *
-                      </label>
-                      <textarea
-                        value={formData.image_description}
-                        onChange={(e) =>
-                          handleInputChange("image_description", e.target.value)
-                        }
-                        placeholder="Describe what you see in the image..."
-                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                          validationErrors.image_description
-                            ? "border-red-500 focus:ring-red-500"
-                            : "border-border focus:ring-primary"
-                        }`}
-                        rows={4}
-                        required
-                      />
-                      {validationErrors.image_description && (
-                        <p className="text-sm text-red-500">
-                          {validationErrors.image_description}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Role Explanation */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Role Explanation *
-                      </label>
-                      <textarea
-                        value={formData.role_explanation}
-                        onChange={(e) =>
-                          handleInputChange("role_explanation", e.target.value)
-                        }
-                        placeholder="Explain why this entity has this role..."
-                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                          validationErrors.role_explanation
-                            ? "border-red-500 focus:ring-red-500"
-                            : "border-border focus:ring-primary"
-                        }`}
-                        rows={4}
-                        required
-                      />
-                      {validationErrors.role_explanation && (
-                        <p className="text-sm text-red-500">
-                          {validationErrors.role_explanation}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Humor Explanation */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Humor Explanation *
-                      </label>
-                      <textarea
-                        value={formData.humor_explanation}
-                        onChange={(e) =>
-                          handleInputChange("humor_explanation", e.target.value)
-                        }
-                        placeholder="What makes this meme funny? Explain the humor..."
-                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                          validationErrors.humor_explanation
-                            ? "border-red-500 focus:ring-red-500"
-                            : "border-border focus:ring-primary"
-                        }`}
-                        rows={4}
-                        required
-                      />
-                      {validationErrors.humor_explanation && (
-                        <p className="text-sm text-red-500">
-                          {validationErrors.humor_explanation}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Context */}
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium text-foreground">
-                        Context *
-                      </label>
-                      <textarea
-                        value={formData.context}
-                        onChange={(e) =>
-                          handleInputChange("context", e.target.value)
-                        }
-                        placeholder="What is the broader context or background?"
-                        className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                          validationErrors.context
-                            ? "border-red-500 focus:ring-red-500"
-                            : "border-border focus:ring-primary"
-                        }`}
-                        rows={4}
-                        required
-                      />
-                      {validationErrors.context && (
-                        <p className="text-sm text-red-500">
-                          {validationErrors.context}
-                        </p>
-                      )}
-                    </div>
-
-                    {/* Action Buttons */}
-                    <div className="flex gap-4 pt-4">
-                      <button
-                        type="submit"
-                        disabled={isSubmitting}
-                        className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isSubmitting ? (
-                          <PixelLoader
-                            message="Saving..."
-                            size="sm"
-                            variant="pulse"
-                          />
-                        ) : (
-                          <>
-                            <Save className="w-4 h-4" />
-                            Save Annotation
-                          </>
-                        )}
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={handleSkip}
-                        disabled={isSubmitting}
-                        className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                      >
-                        {isSubmitting ? (
-                          <PixelLoader
-                            message="Skipping..."
-                            size="sm"
-                            variant="dots"
-                          />
-                        ) : (
-                          <>
-                            <SkipForward className="w-4 h-4" />
-                            Skip
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </form>
-                </div>
+                </form>
               </div>
             </div>
           )}
