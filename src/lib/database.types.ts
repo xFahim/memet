@@ -86,6 +86,7 @@ export interface Database {
             | "others"
             | null;
           ocr_text: string | null;
+          free_form: string | null;
           in_progress_at: string | null;
           completed_at: string | null;
           created_at: string;
@@ -124,6 +125,7 @@ export interface Database {
             | "others"
             | null;
           ocr_text?: string | null;
+          free_form?: string | null;
           in_progress_at?: string | null;
           completed_at?: string | null;
           created_at?: string;
@@ -162,6 +164,7 @@ export interface Database {
             | "others"
             | null;
           ocr_text?: string | null;
+          free_form?: string | null;
           in_progress_at?: string | null;
           completed_at?: string | null;
           created_at?: string;

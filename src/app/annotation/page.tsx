@@ -61,6 +61,7 @@ interface AnnotationFormData {
   humor_explanation: string;
   context: string;
   domain: DomainEnum | "";
+  free_form: string;
 }
 
 // Mock data - in real app this would come from API
@@ -151,6 +152,7 @@ function AnnotationPageContent() {
     humor_explanation: "",
     context: "",
     domain: "",
+    free_form: "",
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -158,7 +160,7 @@ function AnnotationPageContent() {
   const [activeTab, setActiveTab] = useState<"workspace" | "status" | "grid">(
     "workspace"
   );
-  const [formTab, setFormTab] = useState<"entities" | "analysis">("entities");
+  const [formTab, setFormTab] = useState<"human" | "ai">("human");
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -383,6 +385,7 @@ function AnnotationPageContent() {
         humor_explanation: annotation.humor_explanation || "",
         context: annotation.context || "",
         domain: annotation.domain || "",
+        free_form: annotation.free_form || "",
       });
 
       // Also load status data to get accurate meme counter
@@ -483,51 +486,44 @@ function AnnotationPageContent() {
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
 
-    if (!formData.image_description.trim()) {
-      errors.image_description = "Image description is required";
-    }
+    // For human form, only validate free_form
+    if (formTab === "human") {
+      if (!formData.free_form.trim()) {
+        errors.free_form = "Free form annotation is required";
+      }
+    } else {
+      // For complex form, validate all fields
+      if (!formData.image_description.trim()) {
+        errors.image_description = "Image description is required";
+      }
 
-    if (!formData.entity.trim()) {
-      errors.entity = "Entity is required";
-    }
+      if (!formData.entity.trim()) {
+        errors.entity = "Entity is required";
+      }
 
-    if (!formData.role) {
-      errors.role = "Role is required";
-    }
+      if (!formData.role) {
+        errors.role = "Role is required";
+      }
 
-    if (!formData.role_explanation.trim()) {
-      errors.role_explanation = "Role explanation is required";
-    }
+      if (!formData.role_explanation.trim()) {
+        errors.role_explanation = "Role explanation is required";
+      }
 
-    if (!formData.humor_explanation.trim()) {
-      errors.humor_explanation = "Humor explanation is required";
-    }
+      if (!formData.humor_explanation.trim()) {
+        errors.humor_explanation = "Humor explanation is required";
+      }
 
-    if (!formData.context.trim()) {
-      errors.context = "Context is required";
-    }
+      if (!formData.context.trim()) {
+        errors.context = "Context is required";
+      }
 
-    if (!formData.domain) {
-      errors.domain = "Domain is required";
+      if (!formData.domain) {
+        errors.domain = "Domain is required";
+      }
     }
 
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
-  };
-
-  // Tab navigation handlers
-  const handleNextTab = () => {
-    if (formTab === "entities") {
-      if (validateEntitiesTab()) {
-        setFormTab("analysis");
-      }
-    }
-  };
-
-  const handlePreviousTab = () => {
-    if (formTab === "analysis") {
-      setFormTab("entities");
-    }
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -573,7 +569,8 @@ function AnnotationPageContent() {
           role_explanation_2: formData.role_explanation_2,
           humor_explanation: formData.humor_explanation,
           context: formData.context,
-          domain: formData.domain,
+          domain: formData.domain || null,
+          free_form: formData.free_form,
         }),
       });
 
@@ -599,6 +596,7 @@ function AnnotationPageContent() {
         humor_explanation: "",
         context: "",
         domain: "",
+        free_form: "",
       });
 
       // Clear validation errors
@@ -1130,6 +1128,7 @@ function AnnotationPageContent() {
           humor_explanation: "",
           context: "",
           domain: "",
+          free_form: "",
         });
         setValidationErrors({});
         setSelectedAnnotationId(null);
@@ -1257,7 +1256,11 @@ function AnnotationPageContent() {
                   </div>
 
                   {/* Image */}
-                  <div className="relative w-full h-64 mb-4 rounded-lg overflow-hidden border group">
+                  <div
+                    className={`relative w-full mb-4 rounded-lg overflow-hidden border group ${
+                      formTab === "human" ? "h-96" : "h-64"
+                    }`}
+                  >
                     {isLoadingApi ? (
                       <div className="w-full h-full flex items-center justify-center bg-muted/50">
                         <MemeLoader />
@@ -1301,97 +1304,101 @@ function AnnotationPageContent() {
                     </div>
                   )}
 
-                  {/* OCR Text */}
-                  <div className="space-y-2">
-                    <div className="flex items-center justify-between">
-                      <h3 className="font-semibold text-foreground">
-                        Bangla OCR Text:
-                      </h3>
-                      <div className="flex items-center gap-2">
-                        {!isEditingOCR && (
-                          <button
-                            onClick={handleEditOCR}
-                            className="flex items-center gap-2 px-3 py-1 text-xs bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg font-medium hover:bg-blue-500/30 transition-colors"
-                          >
-                            <Edit className="w-3 h-3" />
-                            Edit
-                          </button>
-                        )}
-                        <button
-                          onClick={handleExtractOCR}
-                          disabled={isExtractingOCR || !apiResponse?.image_url}
-                          className="flex items-center gap-2 px-3 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          {isExtractingOCR ? (
-                            <PixelLoader
-                              message="Extracting Bangla text..."
-                              size="sm"
-                              variant="dots"
-                            />
-                          ) : (
-                            <>
-                              <FileText className="w-3 h-3" />
-                              Extract Bangla OCR
-                            </>
+                  {/* OCR Text - Hidden in Human Form */}
+                  {formTab !== "human" && (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-semibold text-foreground">
+                          Bangla OCR Text:
+                        </h3>
+                        <div className="flex items-center gap-2">
+                          {!isEditingOCR && (
+                            <button
+                              onClick={handleEditOCR}
+                              className="flex items-center gap-2 px-3 py-1 text-xs bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg font-medium hover:bg-blue-500/30 transition-colors"
+                            >
+                              <Edit className="w-3 h-3" />
+                              Edit
+                            </button>
                           )}
-                        </button>
-                      </div>
-                    </div>
-
-                    {isEditingOCR ? (
-                      <div className="space-y-2">
-                        <textarea
-                          value={editableOCRText}
-                          onChange={(e) => setEditableOCRText(e.target.value)}
-                          placeholder="Edit the OCR text here..."
-                          className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] resize-y"
-                          rows={4}
-                        />
-                        <div className="flex gap-2">
                           <button
-                            onClick={handleSaveOCR}
-                            className="flex items-center gap-2 px-3 py-1 text-xs bg-green-500/20 text-green-500 border border-green-500/30 rounded-lg font-medium hover:bg-green-500/30 transition-colors"
+                            onClick={handleExtractOCR}
+                            disabled={
+                              isExtractingOCR || !apiResponse?.image_url
+                            }
+                            className="flex items-center gap-2 px-3 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                           >
-                            <Check className="w-3 h-3" />
-                            Save
-                          </button>
-                          <button
-                            onClick={handleCancelOCR}
-                            className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-500/20 text-gray-500 border border-gray-500/30 rounded-lg font-medium hover:bg-gray-500/30 transition-colors"
-                          >
-                            <X className="w-3 h-3" />
-                            Cancel
+                            {isExtractingOCR ? (
+                              <PixelLoader
+                                message="Extracting Bangla text..."
+                                size="sm"
+                                variant="dots"
+                              />
+                            ) : (
+                              <>
+                                <FileText className="w-3 h-3" />
+                                Extract Bangla OCR
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
-                    ) : (
-                      <div className="relative group">
-                        <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded min-h-[60px]">
-                          {apiResponse?.annotation?.ocr_text ||
-                            mockImageData.ocr_text ||
-                            "No OCR text available"}
-                        </p>
-                        {apiResponse?.annotation?.ocr_text && (
-                          <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+
+                      {isEditingOCR ? (
+                        <div className="space-y-2">
+                          <textarea
+                            value={editableOCRText}
+                            onChange={(e) => setEditableOCRText(e.target.value)}
+                            placeholder="Edit the OCR text here..."
+                            className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] resize-y"
+                            rows={4}
+                          />
+                          <div className="flex gap-2">
                             <button
-                              onClick={handleEditOCR}
-                              className="p-1 bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+                              onClick={handleSaveOCR}
+                              className="flex items-center gap-2 px-3 py-1 text-xs bg-green-500/20 text-green-500 border border-green-500/30 rounded-lg font-medium hover:bg-green-500/30 transition-colors"
                             >
-                              <Edit className="w-3 h-3" />
+                              <Check className="w-3 h-3" />
+                              Save
+                            </button>
+                            <button
+                              onClick={handleCancelOCR}
+                              className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-500/20 text-gray-500 border border-gray-500/30 rounded-lg font-medium hover:bg-gray-500/30 transition-colors"
+                            >
+                              <X className="w-3 h-3" />
+                              Cancel
                             </button>
                           </div>
-                        )}
-                      </div>
-                    )}
+                        </div>
+                      ) : (
+                        <div className="relative group">
+                          <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded min-h-[60px]">
+                            {apiResponse?.annotation?.ocr_text ||
+                              mockImageData.ocr_text ||
+                              "No OCR text available"}
+                          </p>
+                          {apiResponse?.annotation?.ocr_text && (
+                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <button
+                                onClick={handleEditOCR}
+                                className="p-1 bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
+                              >
+                                <Edit className="w-3 h-3" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
-                    {ocrError && (
-                      <div className="p-2 bg-red-500/20 border border-red-500/30 rounded-lg">
-                        <p className="text-xs text-red-500">
-                          OCR Error: {ocrError}
-                        </p>
-                      </div>
-                    )}
-                  </div>
+                      {ocrError && (
+                        <div className="p-2 bg-red-500/20 border border-red-500/30 rounded-lg">
+                          <p className="text-xs text-red-500">
+                            OCR Error: {ocrError}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Show API Error if any */}
                   {apiError && (
@@ -1401,56 +1408,58 @@ function AnnotationPageContent() {
                   )}
                 </div>
 
-                {/* Annotation Guidelines */}
-                <div className="bg-card/50 rounded-lg border p-6">
-                  <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                    <FileText className="w-5 h-5" />
-                    Annotation Guidelines
-                  </h3>
+                {/* Annotation Guidelines - Hidden in Human Form */}
+                {formTab !== "human" && (
+                  <div className="bg-card/50 rounded-lg border p-6">
+                    <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                      <FileText className="w-5 h-5" />
+                      Annotation Guidelines
+                    </h3>
 
-                  <div className="space-y-3 text-sm">
-                    {/* Role Explanation Format */}
-                    <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                      <h4 className="font-bold text-blue-500 mb-1">
-                        📝 Role Explanation
-                      </h4>
-                      <p className="text-muted-foreground">
-                        Format:{" "}
-                        <span className="font-bold text-foreground">
-                          [Entity] [Action/Concept] [Brief Description]
-                        </span>
-                      </p>
-                    </div>
+                    <div className="space-y-3 text-sm">
+                      {/* Role Explanation Format */}
+                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
+                        <h4 className="font-bold text-blue-500 mb-1">
+                          📝 Role Explanation
+                        </h4>
+                        <p className="text-muted-foreground">
+                          Format:{" "}
+                          <span className="font-bold text-foreground">
+                            [Entity] [Action/Concept] [Brief Description]
+                          </span>
+                        </p>
+                      </div>
 
-                    {/* Humor Explanation Format */}
-                    <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-                      <h4 className="font-bold text-yellow-500 mb-1">
-                        😄 Humor Explanation
-                      </h4>
-                      <p className="text-muted-foreground">
-                        Format:{" "}
-                        <span className="font-bold text-foreground">
-                          [Humor Type or Device] [Target/Entity] [Reason for
-                          Humor]
-                        </span>
-                      </p>
-                    </div>
+                      {/* Humor Explanation Format */}
+                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
+                        <h4 className="font-bold text-yellow-500 mb-1">
+                          😄 Humor Explanation
+                        </h4>
+                        <p className="text-muted-foreground">
+                          Format:{" "}
+                          <span className="font-bold text-foreground">
+                            [Humor Type or Device] [Target/Entity] [Reason for
+                            Humor]
+                          </span>
+                        </p>
+                      </div>
 
-                    {/* Context Format */}
-                    <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
-                      <h4 className="font-bold text-green-500 mb-1">
-                        🌍 Context
-                      </h4>
-                      <p className="text-muted-foreground">
-                        Format:{" "}
-                        <span className="font-bold text-foreground">
-                          [Entity/Event] [Situation/Background] [Relevance to
-                          Meme]
-                        </span>
-                      </p>
+                      {/* Context Format */}
+                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
+                        <h4 className="font-bold text-green-500 mb-1">
+                          🌍 Context
+                        </h4>
+                        <p className="text-muted-foreground">
+                          Format:{" "}
+                          <span className="font-bold text-foreground">
+                            [Entity/Event] [Situation/Background] [Relevance to
+                            Meme]
+                          </span>
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Right Side - Tabbed Form Interface */}
@@ -1459,26 +1468,26 @@ function AnnotationPageContent() {
                 <div className="bg-card/50 rounded-lg border p-1">
                   <div className="flex">
                     <button
-                      onClick={() => setFormTab("entities")}
+                      onClick={() => setFormTab("human")}
                       className={`flex-1 px-4 py-3 rounded-md font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
-                        formTab === "entities"
+                        formTab === "human"
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
                     >
-                      <div className="w-2 h-2 bg-primary rounded-full"></div>
-                      Entity Details
+                      <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                      Human Form
                     </button>
                     <button
-                      onClick={() => setFormTab("analysis")}
+                      onClick={() => setFormTab("ai")}
                       className={`flex-1 px-4 py-3 rounded-md font-medium transition-all duration-300 flex items-center justify-center gap-2 ${
-                        formTab === "analysis"
+                        formTab === "ai"
                           ? "bg-primary text-primary-foreground shadow-sm"
                           : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                       }`}
                     >
-                      <div className="w-2 h-2 bg-accent rounded-full"></div>
-                      Analysis
+                      <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
+                      AI Form
                     </button>
                   </div>
                 </div>
@@ -1510,8 +1519,88 @@ function AnnotationPageContent() {
 
                 {/* Form Content */}
                 <form onSubmit={handleSubmit} className="space-y-6">
-                  {/* Entity Details Tab */}
-                  {formTab === "entities" && (
+                  {/* Human Form Tab */}
+                  {formTab === "human" && (
+                    <div className="space-y-6">
+                      {/* Free Form Annotation */}
+                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                          Free Form Annotation
+                        </h3>
+
+                        <div className="space-y-2">
+                          <label className="text-sm font-medium text-foreground">
+                            Your Annotation *
+                          </label>
+                          <textarea
+                            value={formData.free_form}
+                            onChange={(e) =>
+                              handleInputChange("free_form", e.target.value)
+                            }
+                            placeholder="Write your annotation here... Describe what you see, the humor, context, entities, or any other observations about this meme."
+                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                              validationErrors.free_form
+                                ? "border-red-500 focus:ring-red-500"
+                                : "border-border focus:ring-primary"
+                            }`}
+                            rows={8}
+                            required
+                          />
+                          {validationErrors.free_form && (
+                            <p className="text-sm text-red-500">
+                              {validationErrors.free_form}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Submit Buttons */}
+                      <div className="flex justify-end gap-4">
+                        <button
+                          type="button"
+                          onClick={handleSkip}
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting ? (
+                            <PixelLoader
+                              message="Skipping..."
+                              size="sm"
+                              variant="dots"
+                            />
+                          ) : (
+                            <>
+                              <SkipForward className="w-4 h-4" />
+                              Skip
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting ? (
+                            <PixelLoader
+                              message="Saving..."
+                              size="sm"
+                              variant="pulse"
+                            />
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save Annotation
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* AI Form Tab */}
+                  {formTab === "ai" && (
                     <div className="space-y-6">
                       {/* Primary Entity Section */}
                       <div className="bg-card/50 rounded-lg border p-6 space-y-4">
@@ -1748,23 +1837,6 @@ function AnnotationPageContent() {
                         </div>
                       </div>
 
-                      {/* Tab Navigation Buttons */}
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
-                          onClick={handleNextTab}
-                          className="flex items-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors"
-                        >
-                          Next: Analysis
-                          <ArrowLeft className="w-4 h-4 rotate-180" />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Analysis Tab */}
-                  {formTab === "analysis" && (
-                    <div className="space-y-6">
                       {/* Image Description */}
                       <div className="bg-card/50 rounded-lg border p-6 space-y-4">
                         <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
@@ -1870,57 +1942,46 @@ function AnnotationPageContent() {
                         </div>
                       </div>
 
-                      {/* Tab Navigation and Submit Buttons */}
-                      <div className="flex justify-between">
+                      {/* Submit Buttons */}
+                      <div className="flex justify-end gap-4">
                         <button
                           type="button"
-                          onClick={handlePreviousTab}
-                          className="flex items-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors"
+                          onClick={handleSkip}
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          <ArrowLeft className="w-4 h-4" />
-                          Back: Entity Details
+                          {isSubmitting ? (
+                            <PixelLoader
+                              message="Skipping..."
+                              size="sm"
+                              variant="dots"
+                            />
+                          ) : (
+                            <>
+                              <SkipForward className="w-4 h-4" />
+                              Skip
+                            </>
+                          )}
                         </button>
 
-                        <div className="flex gap-4">
-                          <button
-                            type="button"
-                            onClick={handleSkip}
-                            disabled={isSubmitting}
-                            className="flex items-center justify-center gap-2 px-6 py-3 border border-border text-foreground rounded-lg font-medium hover:bg-muted/50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {isSubmitting ? (
-                              <PixelLoader
-                                message="Skipping..."
-                                size="sm"
-                                variant="dots"
-                              />
-                            ) : (
-                              <>
-                                <SkipForward className="w-4 h-4" />
-                                Skip
-                              </>
-                            )}
-                          </button>
-
-                          <button
-                            type="submit"
-                            disabled={isSubmitting}
-                            className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {isSubmitting ? (
-                              <PixelLoader
-                                message="Saving..."
-                                size="sm"
-                                variant="pulse"
-                              />
-                            ) : (
-                              <>
-                                <Save className="w-4 h-4" />
-                                Save Annotation
-                              </>
-                            )}
-                          </button>
-                        </div>
+                        <button
+                          type="submit"
+                          disabled={isSubmitting}
+                          className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-primary-foreground rounded-lg font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSubmitting ? (
+                            <PixelLoader
+                              message="Saving..."
+                              size="sm"
+                              variant="pulse"
+                            />
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4" />
+                              Save Annotation
+                            </>
+                          )}
+                        </button>
                       </div>
                     </div>
                   )}

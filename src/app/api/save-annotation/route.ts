@@ -23,6 +23,7 @@ export async function POST(req: NextRequest) {
       humor_explanation,
       context,
       domain,
+      free_form,
     } = body;
 
     if (!annotationId || !annotatorName) {
@@ -79,7 +80,8 @@ export async function POST(req: NextRequest) {
         role_explanation_2,
         humor_explanation,
         context,
-        domain,
+        domain: domain || null,
+        free_form,
         annotation_status: "completed",
         in_progress_at: null,
       })
