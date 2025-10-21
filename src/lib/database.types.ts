@@ -171,6 +171,26 @@ export interface Database {
           updated_at?: string;
         };
       };
+      geminikeys: {
+        Row: {
+          id: string;
+          name: string;
+          key: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          key: string;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          key?: string;
+          created_at?: string;
+        };
+      };
     };
     Views: {
       annotator_summary: {

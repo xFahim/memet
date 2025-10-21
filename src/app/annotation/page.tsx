@@ -34,7 +34,9 @@ import { LightRays } from "@/components/ui/light-rays";
 import { useState, useEffect, useCallback, Suspense } from "react";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useTesseractOCR } from "@/hooks/useTesseractOCR";
+import StatusTable from "@/components/annotation/StatusTable";
+import MemeGrid from "@/components/annotation/MemeGrid";
+import APISetup from "@/components/annotation/APISetup";
 
 // Enum types matching the database
 type RoleEnum = "hero" | "villain" | "victim" | "other";
@@ -68,7 +70,6 @@ interface AnnotationFormData {
 const mockImageData = {
   id: "img_001",
   path: "/politics.jpeg", // This would be the actual image path from DB
-  ocr_text: "Sample OCR text from the meme image",
   folder: "Political meme",
 };
 
@@ -157,18 +158,27 @@ function AnnotationPageContent() {
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isImageModalOpen, setIsImageModalOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"workspace" | "status" | "grid">(
-    "workspace"
-  );
+  const [activeTab, setActiveTab] = useState<
+    "workspace" | "status" | "grid" | "api-setup"
+  >("workspace");
   const [formTab, setFormTab] = useState<"human" | "ai">("human");
   const [apiResponse, setApiResponse] = useState<any>(null);
   const [isLoadingApi, setIsLoadingApi] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [skipSuccess, setSkipSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [validationErrors, setValidationErrors] = useState<
     Record<string, string>
   >({});
+  const [aiFillupSuccess, setAiFillupSuccess] = useState(false);
+  const [isGeneratingFillup, setIsGeneratingFillup] = useState(false);
+  const [aiFillupError, setAiFillupError] = useState<string | null>(null);
+  const [aiFillupRawResponse, setAiFillupRawResponse] = useState<string | null>(
+    null
+  );
+  const [showRawResponse, setShowRawResponse] = useState(false);
+  const [selectedApiKey, setSelectedApiKey] = useState<string>("");
   const [statusData, setStatusData] = useState<any>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -182,20 +192,17 @@ function AnnotationPageContent() {
   const [gridPage, setGridPage] = useState(1);
   const [gridItemsPerPage] = useState(20); // Load 20 items at a time
 
-  // Use the Tesseract OCR hook
-  const {
-    extractText,
-    isProcessing: isExtractingOCR,
-    error: ocrError,
-  } = useTesseractOCR();
-
-  // OCR text editing state
-  const [isEditingOCR, setIsEditingOCR] = useState(false);
-  const [editableOCRText, setEditableOCRText] = useState("");
-
   // Get user and folder from URL parameters
   const userName = searchParams.get("user") || "";
   const folderName = searchParams.get("folder") || "";
+
+  // Handle API key selection
+  const handleApiKeySelected = useCallback(
+    (keyId: string, keyValue: string) => {
+      setSelectedApiKey(keyValue);
+    },
+    []
+  );
 
   const handleStartAnnotating = useCallback(async () => {
     if (!userName || !folderName) {
@@ -559,7 +566,6 @@ function AnnotationPageContent() {
         body: JSON.stringify({
           annotatorName: userName,
           annotationId: apiResponse.annotation.id,
-          ocr_text: apiResponse.annotation.ocr_text || "",
           image_description: formData.image_description,
           entity: formData.entity,
           role: formData.role,
@@ -717,9 +723,9 @@ function AnnotationPageContent() {
 
           if (nextResponse.ok) {
             setApiResponse(nextData);
-            setSaveSuccess(true);
+            setSkipSuccess(true);
             setTimeout(() => {
-              setSaveSuccess(false);
+              setSkipSuccess(false);
             }, 3000);
           } else {
             // If no more annotations, show a message
@@ -756,9 +762,9 @@ function AnnotationPageContent() {
         }
 
         // Show success message
-        setSaveSuccess(true);
+        setSkipSuccess(true);
         setTimeout(() => {
-          setSaveSuccess(false);
+          setSkipSuccess(false);
         }, 3000);
       }
 
@@ -779,68 +785,94 @@ function AnnotationPageContent() {
     router.back();
   };
 
-  const handleExtractOCR = async () => {
-    if (!apiResponse?.image_url) {
+  const handleAIFillup = async () => {
+    if (!apiResponse?.image_url || !formData.free_form) {
+      setAiFillupError(
+        "Image and free form annotation are required for AI fillup"
+      );
       return;
     }
 
-    try {
-      const result = await extractText(apiResponse.image_url);
+    setIsGeneratingFillup(true);
+    setAiFillupError(null);
+    setAiFillupSuccess(false);
+    setAiFillupRawResponse(null);
 
-      // Update the OCR text in the API response
-      if (apiResponse?.annotation) {
-        setApiResponse({
-          ...apiResponse,
-          annotation: {
-            ...apiResponse.annotation,
-            ocr_text: result.text || "No text detected",
-          },
-        });
+    try {
+      const response = await fetch("/api/ai-fillup", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          imageUrl: apiResponse.image_url,
+          context: formData.free_form,
+          apiKey: selectedApiKey,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "AI fillup failed");
+      }
+
+      // Store raw response for debugging
+      setAiFillupRawResponse(
+        data.rawResponse || JSON.stringify(data.data, null, 2)
+      );
+
+      // Auto-populate form fields with AI-generated data
+      if (data.data) {
+        setFormData((prev) => ({
+          ...prev,
+          entity: data.data.entity || prev.entity,
+          role: data.data.role || prev.role,
+          role_explanation: data.data.role_explanation || prev.role_explanation,
+          entity_2: data.data.entity_2 || prev.entity_2,
+          role_2: data.data.role_2 || prev.role_2,
+          role_explanation_2:
+            data.data.role_explanation_2 || prev.role_explanation_2,
+          humor_explanation:
+            data.data.humor_explanation || prev.humor_explanation,
+          context: data.data.context || prev.context,
+          domain: data.data.domain || prev.domain,
+          image_description:
+            data.data.image_description || prev.image_description,
+        }));
+
+        setAiFillupSuccess(true);
+        // Clear success message after 3 seconds
+        setTimeout(() => setAiFillupSuccess(false), 3000);
+      } else {
+        setAiFillupError("No structured data received from AI");
+      }
+
+      if (data.error) {
+        setAiFillupError(data.error);
       }
     } catch (error: any) {
-      console.error("Tesseract OCR extraction error:", error);
-      // Error is already handled by the hook
+      console.error("AI Fillup Error:", error);
+      setAiFillupError(error.message || "Failed to generate AI fillup");
+    } finally {
+      setIsGeneratingFillup(false);
     }
-  };
-
-  const handleEditOCR = () => {
-    const currentOCRText = apiResponse?.annotation?.ocr_text || "";
-    setEditableOCRText(currentOCRText);
-    setIsEditingOCR(true);
-  };
-
-  const handleSaveOCR = () => {
-    if (apiResponse?.annotation) {
-      setApiResponse({
-        ...apiResponse,
-        annotation: {
-          ...apiResponse.annotation,
-          ocr_text: editableOCRText,
-        },
-      });
-    }
-    setIsEditingOCR(false);
-  };
-
-  const handleCancelOCR = () => {
-    setEditableOCRText("");
-    setIsEditingOCR(false);
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
       case "completed":
-        return "bg-green-500/20 text-green-500 border-green-500/30";
+        return "bg-chart-3/20 text-chart-3 border-chart-3/30";
       case "in_progress":
-        return "bg-blue-500/20 text-blue-500 border-blue-500/30";
+        return "bg-chart-2/20 text-chart-2 border-chart-2/30";
       case "reviewed":
-        return "bg-purple-500/20 text-purple-500 border-purple-500/30";
+        return "bg-primary/20 text-primary border-primary/30";
       case "skipped":
-        return "bg-yellow-500/20 text-yellow-500 border-yellow-500/30";
+        return "bg-chart-4/20 text-chart-4 border-chart-4/30";
       case "pending":
-        return "bg-gray-500/20 text-gray-500 border-gray-500/30";
+        return "bg-muted/20 text-muted-foreground border-muted/30";
       default:
-        return "bg-gray-500/20 text-gray-500 border-gray-500/30";
+        return "bg-muted/20 text-muted-foreground border-muted/30";
     }
   };
 
@@ -1066,7 +1098,7 @@ function AnnotationPageContent() {
     }
 
     const confirmed = window.confirm(
-      `Are you sure you want to clear all your annotation data for folder "${folderName}"?\n\nThis will:\n• Reset all your memes to "pending" status\n• Remove all your annotation text (OCR, descriptions, explanations)\n• Keep the meme assignments and system data\n\nThis action cannot be undone.`
+      `Are you sure you want to clear all your annotation data for folder "${folderName}"?\n\nThis will:\n• Reset all your memes to "pending" status\n• Remove all your annotation text (descriptions, explanations)\n• Keep the meme assignments and system data\n\nThis action cannot be undone.`
     );
 
     if (!confirmed) {
@@ -1238,231 +1270,24 @@ function AnnotationPageContent() {
                 <Grid3X3 className="w-4 h-4" />
                 Meme Grid
               </button>
+              <button
+                onClick={() => setActiveTab("api-setup")}
+                className={`px-6 py-3 rounded-md font-medium transition-all duration-300 flex items-center gap-2 ${
+                  activeTab === "api-setup"
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <div className="w-4 h-4 bg-gradient-to-r from-blue-500 to-cyan-500 rounded"></div>
+                API Setup
+              </button>
             </div>
           </div>
 
           {/* Tab Content */}
           {activeTab === "workspace" && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              {/* Left Side - Image and Guidelines */}
-              <div className="space-y-6">
-                {/* Image Display */}
-                <div className="bg-card/50 rounded-lg border p-6">
-                  <div className="mb-4">
-                    <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
-                      <ImageIcon className="w-5 h-5" />
-                      Image to Annotate
-                    </h2>
-                  </div>
-
-                  {/* Image */}
-                  <div
-                    className={`relative w-full mb-4 rounded-lg overflow-hidden border group ${
-                      formTab === "human" ? "h-96" : "h-64"
-                    }`}
-                  >
-                    {isLoadingApi ? (
-                      <div className="w-full h-full flex items-center justify-center bg-muted/50">
-                        <MemeLoader />
-                      </div>
-                    ) : (
-                      <>
-                        <Image
-                          src={apiResponse?.image_url || mockImageData.path}
-                          alt="Meme to annotate"
-                          fill
-                          className="object-cover"
-                        />
-                        {/* Zoom Button */}
-                        <button
-                          onClick={() => setIsImageModalOpen(true)}
-                          className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-black/70"
-                        >
-                          <ZoomIn className="w-4 h-4" />
-                        </button>
-                      </>
-                    )}
-                  </div>
-
-                  {/* Image URL for debugging */}
-                  {apiResponse?.image_url && (
-                    <div className="space-y-2">
-                      <h3 className="font-semibold text-foreground">
-                        Image URL:
-                      </h3>
-                      <p className="text-xs text-muted-foreground bg-muted/50 p-3 rounded break-all">
-                        {apiResponse.image_url}
-                      </p>
-                      <a
-                        href={apiResponse.image_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-blue-500 hover:underline"
-                      >
-                        Open image in new tab
-                      </a>
-                    </div>
-                  )}
-
-                  {/* OCR Text - Hidden in Human Form */}
-                  {formTab !== "human" && (
-                    <div className="space-y-2">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-semibold text-foreground">
-                          Bangla OCR Text:
-                        </h3>
-                        <div className="flex items-center gap-2">
-                          {!isEditingOCR && (
-                            <button
-                              onClick={handleEditOCR}
-                              className="flex items-center gap-2 px-3 py-1 text-xs bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg font-medium hover:bg-blue-500/30 transition-colors"
-                            >
-                              <Edit className="w-3 h-3" />
-                              Edit
-                            </button>
-                          )}
-                          <button
-                            onClick={handleExtractOCR}
-                            disabled={
-                              isExtractingOCR || !apiResponse?.image_url
-                            }
-                            className="flex items-center gap-2 px-3 py-1 text-xs bg-primary/20 text-primary border border-primary/30 rounded-lg font-medium hover:bg-primary/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          >
-                            {isExtractingOCR ? (
-                              <PixelLoader
-                                message="Extracting Bangla text..."
-                                size="sm"
-                                variant="dots"
-                              />
-                            ) : (
-                              <>
-                                <FileText className="w-3 h-3" />
-                                Extract Bangla OCR
-                              </>
-                            )}
-                          </button>
-                        </div>
-                      </div>
-
-                      {isEditingOCR ? (
-                        <div className="space-y-2">
-                          <textarea
-                            value={editableOCRText}
-                            onChange={(e) => setEditableOCRText(e.target.value)}
-                            placeholder="Edit the OCR text here..."
-                            className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary min-h-[100px] resize-y"
-                            rows={4}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              onClick={handleSaveOCR}
-                              className="flex items-center gap-2 px-3 py-1 text-xs bg-green-500/20 text-green-500 border border-green-500/30 rounded-lg font-medium hover:bg-green-500/30 transition-colors"
-                            >
-                              <Check className="w-3 h-3" />
-                              Save
-                            </button>
-                            <button
-                              onClick={handleCancelOCR}
-                              className="flex items-center gap-2 px-3 py-1 text-xs bg-gray-500/20 text-gray-500 border border-gray-500/30 rounded-lg font-medium hover:bg-gray-500/30 transition-colors"
-                            >
-                              <X className="w-3 h-3" />
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="relative group">
-                          <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded min-h-[60px]">
-                            {apiResponse?.annotation?.ocr_text ||
-                              mockImageData.ocr_text ||
-                              "No OCR text available"}
-                          </p>
-                          {apiResponse?.annotation?.ocr_text && (
-                            <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button
-                                onClick={handleEditOCR}
-                                className="p-1 bg-black/50 text-white rounded hover:bg-black/70 transition-colors"
-                              >
-                                <Edit className="w-3 h-3" />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      )}
-
-                      {ocrError && (
-                        <div className="p-2 bg-red-500/20 border border-red-500/30 rounded-lg">
-                          <p className="text-xs text-red-500">
-                            OCR Error: {ocrError}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Show API Error if any */}
-                  {apiError && (
-                    <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
-                      <p className="text-sm text-red-500">Error: {apiError}</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Annotation Guidelines - Hidden in Human Form */}
-                {formTab !== "human" && (
-                  <div className="bg-card/50 rounded-lg border p-6">
-                    <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                      <FileText className="w-5 h-5" />
-                      Annotation Guidelines
-                    </h3>
-
-                    <div className="space-y-3 text-sm">
-                      {/* Role Explanation Format */}
-                      <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3">
-                        <h4 className="font-bold text-blue-500 mb-1">
-                          📝 Role Explanation
-                        </h4>
-                        <p className="text-muted-foreground">
-                          Format:{" "}
-                          <span className="font-bold text-foreground">
-                            [Entity] [Action/Concept] [Brief Description]
-                          </span>
-                        </p>
-                      </div>
-
-                      {/* Humor Explanation Format */}
-                      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3">
-                        <h4 className="font-bold text-yellow-500 mb-1">
-                          😄 Humor Explanation
-                        </h4>
-                        <p className="text-muted-foreground">
-                          Format:{" "}
-                          <span className="font-bold text-foreground">
-                            [Humor Type or Device] [Target/Entity] [Reason for
-                            Humor]
-                          </span>
-                        </p>
-                      </div>
-
-                      {/* Context Format */}
-                      <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3">
-                        <h4 className="font-bold text-green-500 mb-1">
-                          🌍 Context
-                        </h4>
-                        <p className="text-muted-foreground">
-                          Format:{" "}
-                          <span className="font-bold text-foreground">
-                            [Entity/Event] [Situation/Background] [Relevance to
-                            Meme]
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Right Side - Tabbed Form Interface */}
+            <div className="max-w-4xl mx-auto">
+              {/* Form Interface */}
               <div className="space-y-6">
                 {/* Form Tab Navigation */}
                 <div className="bg-card/50 rounded-lg border p-1">
@@ -1498,9 +1323,18 @@ function AnnotationPageContent() {
                     <div className="flex items-center gap-2">
                       <div className="w-2 h-2 bg-green-500 rounded-full"></div>
                       <p className="text-sm text-green-500 font-medium">
-                        {selectedAnnotationId
-                          ? "Annotation skipped! Loading next annotation... ⏭️"
-                          : "Annotation saved successfully! 🎉"}
+                        Annotation saved successfully! 🎉
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {skipSuccess && (
+                  <div className="p-4 bg-yellow-500/20 border border-yellow-500/30 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                      <p className="text-sm text-yellow-500 font-medium">
+                        Annotation skipped! Loading next annotation... ⏭️
                       </p>
                     </div>
                   </div>
@@ -1522,36 +1356,109 @@ function AnnotationPageContent() {
                   {/* Human Form Tab */}
                   {formTab === "human" && (
                     <div className="space-y-6">
-                      {/* Free Form Annotation */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          Free Form Annotation
-                        </h3>
+                      {/* Side-by-side layout for Image and Free Form Annotation */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left Column - Image Display */}
+                        <div className="bg-card/50 rounded-lg border p-6">
+                          <div className="mb-4">
+                            <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                              <ImageIcon className="w-5 h-5" />
+                              Image to Annotate
+                            </h2>
+                          </div>
 
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Your Annotation *
-                          </label>
-                          <textarea
-                            value={formData.free_form}
-                            onChange={(e) =>
-                              handleInputChange("free_form", e.target.value)
-                            }
-                            placeholder="Write your annotation here... Describe what you see, the humor, context, entities, or any other observations about this meme."
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.free_form
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={8}
-                            required
-                          />
-                          {validationErrors.free_form && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.free_form}
-                            </p>
+                          {/* Image - Reduced width to fit meme better */}
+                          <div className="relative w-full mb-4 rounded-lg overflow-hidden border group h-80 bg-muted/20">
+                            {isLoadingApi ? (
+                              <div className="w-full h-full flex items-center justify-center bg-muted/50">
+                                <MemeLoader />
+                              </div>
+                            ) : (
+                              <>
+                                <Image
+                                  src={
+                                    apiResponse?.image_url || mockImageData.path
+                                  }
+                                  alt="Meme to annotate"
+                                  fill
+                                  className="object-contain"
+                                />
+                                {/* Zoom Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsImageModalOpen(true);
+                                  }}
+                                  className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-black/70"
+                                >
+                                  <ZoomIn className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Image URL for debugging */}
+                          {apiResponse?.image_url && (
+                            <div className="space-y-2">
+                              <h3 className="font-semibold text-foreground">
+                                Image URL:
+                              </h3>
+                              <p className="text-xs text-muted-foreground bg-muted/50 p-3 rounded break-all">
+                                {apiResponse.image_url}
+                              </p>
+                              <a
+                                href={apiResponse.image_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-500 hover:underline"
+                              >
+                                Open image in new tab
+                              </a>
+                            </div>
                           )}
+
+                          {/* Show API Error if any */}
+                          {apiError && (
+                            <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                              <p className="text-sm text-red-500">
+                                Error: {apiError}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Right Column - Free Form Annotation */}
+                        <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                          <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            Free Form Annotation
+                          </h3>
+
+                          <div className="space-y-2">
+                            <label className="text-sm font-medium text-foreground">
+                              Your Annotation *
+                            </label>
+                            <textarea
+                              value={formData.free_form}
+                              onChange={(e) =>
+                                handleInputChange("free_form", e.target.value)
+                              }
+                              placeholder="Write your annotation here... Describe what you see, the humor, context, entities, or any other observations about this meme."
+                              className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                validationErrors.free_form
+                                  ? "border-red-500 focus:ring-red-500"
+                                  : "border-border focus:ring-primary"
+                              }`}
+                              rows={8}
+                              required
+                            />
+                            {validationErrors.free_form && (
+                              <p className="text-sm text-red-500">
+                                {validationErrors.free_form}
+                              </p>
+                            )}
+                          </div>
                         </div>
                       </div>
 
@@ -1602,347 +1509,539 @@ function AnnotationPageContent() {
                   {/* AI Form Tab */}
                   {formTab === "ai" && (
                     <div className="space-y-6">
-                      {/* Primary Entity Section */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-primary rounded-full"></div>
-                          Primary Entity
-                        </h3>
+                      {/* Side-by-side layout for Image and Free Form Annotation */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left Column - Image Display */}
+                        <div className="bg-card/50 rounded-lg border p-6">
+                          <div className="mb-4">
+                            <h2 className="text-xl font-bold text-foreground flex items-center gap-2">
+                              <ImageIcon className="w-5 h-5" />
+                              Image to Annotate
+                            </h2>
+                          </div>
 
-                        {/* Entity */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Entity *
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.entity}
-                            onChange={(e) =>
-                              handleInputChange("entity", e.target.value)
-                            }
-                            placeholder="Who or what is the main subject?"
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.entity
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            required
-                          />
-                          {validationErrors.entity && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.entity}
-                            </p>
+                          {/* Image */}
+                          <div className="relative w-full mb-4 rounded-lg overflow-hidden border group h-80 bg-muted/20">
+                            {isLoadingApi ? (
+                              <div className="w-full h-full flex items-center justify-center bg-muted/50">
+                                <MemeLoader />
+                              </div>
+                            ) : (
+                              <>
+                                <Image
+                                  src={
+                                    apiResponse?.image_url || mockImageData.path
+                                  }
+                                  alt="Meme to annotate"
+                                  fill
+                                  className="object-contain"
+                                />
+                                {/* Zoom Button */}
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setIsImageModalOpen(true);
+                                  }}
+                                  className="absolute top-2 right-2 p-2 bg-black/50 text-white rounded-lg opacity-0 group-hover:opacity-100 transition-opacity duration-200 hover:bg-black/70"
+                                >
+                                  <ZoomIn className="w-4 h-4" />
+                                </button>
+                              </>
+                            )}
+                          </div>
+
+                          {/* Image URL for debugging */}
+                          {apiResponse?.image_url && (
+                            <div className="space-y-2">
+                              <h3 className="font-semibold text-foreground">
+                                Image URL:
+                              </h3>
+                              <p className="text-xs text-muted-foreground bg-muted/50 p-3 rounded break-all">
+                                {apiResponse.image_url}
+                              </p>
+                              <a
+                                href={apiResponse.image_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs text-blue-500 hover:underline"
+                              >
+                                Open image in new tab
+                              </a>
+                            </div>
+                          )}
+
+                          {/* Show API Error if any */}
+                          {apiError && (
+                            <div className="mt-4 p-3 bg-red-500/20 border border-red-500/30 rounded-lg">
+                              <p className="text-sm text-red-500">
+                                Error: {apiError}
+                              </p>
+                            </div>
                           )}
                         </div>
 
-                        {/* Role */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Role *
-                          </label>
-                          <select
-                            value={formData.role}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "role",
-                                e.target.value as RoleEnum
-                              )
-                            }
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.role
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            required
-                          >
-                            <option value="">Select a role...</option>
-                            <option value="hero">Hero</option>
-                            <option value="villain">Villain</option>
-                            <option value="victim">Victim</option>
-                            <option value="other">Other</option>
-                          </select>
-                          {validationErrors.role && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.role}
-                            </p>
-                          )}
-                        </div>
+                        {/* Right Column - Free Form Annotation Display */}
+                        <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                          <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                            Free Form Annotation
+                          </h3>
 
-                        {/* Role Explanation */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Role Explanation *
-                          </label>
-                          <textarea
-                            value={formData.role_explanation}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "role_explanation",
-                                e.target.value
-                              )
-                            }
-                            placeholder="Explain why this entity has this role..."
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.role_explanation
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={4}
-                            required
-                          />
-                          {validationErrors.role_explanation && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.role_explanation}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+                          {formData.free_form ? (
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <label className="text-sm font-medium text-foreground">
+                                  Saved Annotation:
+                                </label>
+                                <div className="p-3 border rounded-lg bg-muted/20 text-foreground whitespace-pre-wrap">
+                                  {formData.free_form}
+                                </div>
+                              </div>
 
-                      {/* Secondary Entity Section */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-secondary rounded-full"></div>
-                          Secondary Entity
-                        </h3>
+                              {/* Generate AI fillup button */}
+                              <div className="pt-2">
+                                <button
+                                  type="button"
+                                  onClick={handleAIFillup}
+                                  disabled={isGeneratingFillup}
+                                  className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-lg font-medium hover:from-purple-600 hover:to-pink-600 transition-all duration-300 shadow-lg hover:shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                  {isGeneratingFillup ? (
+                                    <>
+                                      <PixelLoader
+                                        message="Generating..."
+                                        size="sm"
+                                        variant="dots"
+                                      />
+                                      Generating AI fillup...
+                                    </>
+                                  ) : (
+                                    <>
+                                      <div className="w-2 h-2 bg-white rounded-full animate-pulse"></div>
+                                      Generate AI fillup
+                                    </>
+                                  )}
+                                </button>
+                              </div>
 
-                        {/* Entity 2 */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Secondary Entity
-                          </label>
-                          <input
-                            type="text"
-                            value={formData.entity_2}
-                            onChange={(e) =>
-                              handleInputChange("entity_2", e.target.value)
-                            }
-                            placeholder="Second entity or subject (optional)"
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.entity_2
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                          />
-                          {validationErrors.entity_2 && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.entity_2}
-                            </p>
-                          )}
-                        </div>
+                              {/* AI Fillup Success Display */}
+                              {aiFillupSuccess && (
+                                <div className="mt-4 p-4 bg-green-500/10 border border-green-500/30 rounded-lg">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                                    <p className="text-sm text-green-500 font-medium">
+                                      ✅ AI fillup successful! Form fields have
+                                      been populated.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
 
-                        {/* Role 2 */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Secondary Entity's Role
-                          </label>
-                          <select
-                            value={formData.role_2}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "role_2",
-                                e.target.value as RoleEnum
-                              )
-                            }
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.role_2
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                          >
-                            <option value="">Select a role...</option>
-                            <option value="hero">Hero</option>
-                            <option value="villain">Villain</option>
-                            <option value="victim">Victim</option>
-                            <option value="other">Other</option>
-                          </select>
-                          {validationErrors.role_2 && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.role_2}
-                            </p>
-                          )}
-                        </div>
+                              {/* AI Fillup Error Display */}
+                              {aiFillupError && (
+                                <div className="mt-4 p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
+                                    <p className="text-sm text-red-500 font-medium">
+                                      ❌ {aiFillupError}
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
 
-                        {/* Secondary Role Explanation */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Secondary Entity's Explanation
-                          </label>
-                          <textarea
-                            value={formData.role_explanation_2}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "role_explanation_2",
-                                e.target.value
-                              )
-                            }
-                            placeholder="Explain why the secondary entity has this role..."
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.role_explanation_2
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={4}
-                          />
-                          {validationErrors.role_explanation_2 && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.role_explanation_2}
-                            </p>
+                              {/* AI Fillup Raw Response Display */}
+                              {aiFillupRawResponse && (
+                                <div className="mt-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <h4 className="font-semibold text-blue-500">
+                                      Raw AI Response (for debugging):
+                                    </h4>
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        setShowRawResponse(!showRawResponse);
+                                      }}
+                                      className="text-xs text-blue-500 hover:text-blue-400 underline"
+                                    >
+                                      {showRawResponse ? "Hide" : "Show"} Raw
+                                      Response
+                                    </button>
+                                  </div>
+                                  {showRawResponse && (
+                                    <pre className="text-xs text-foreground whitespace-pre-wrap overflow-auto max-h-60 bg-muted/20 p-3 rounded">
+                                      {aiFillupRawResponse}
+                                    </pre>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                No annotation saved yet
+                              </label>
+                              <div className="p-3 border rounded-lg bg-muted/20 text-muted-foreground italic">
+                                This annotation will appear here once it's saved
+                                from the Human Form.
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
 
-                      {/* Domain Section */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-accent rounded-full"></div>
-                          Classification
-                        </h3>
+                      {/* 2 Columns below image */}
+                      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Left Column - Entities */}
+                        <div className="space-y-6">
+                          {/* Primary Entity Section */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-primary rounded-full"></div>
+                              Primary Entity
+                            </h3>
 
-                        {/* Domain */}
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Domain *
-                          </label>
-                          <select
-                            value={formData.domain}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "domain",
-                                e.target.value as DomainEnum
-                              )
-                            }
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.domain
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            required
-                          >
-                            <option value="">Select a domain...</option>
-                            <option value="politics">Politics</option>
-                            <option value="education">Education</option>
-                            <option value="health">Health</option>
-                            <option value="religion">Religion</option>
-                            <option value="society">Society</option>
-                            <option value="pop_culture">Pop Culture</option>
-                            <option value="economy">Economy</option>
-                            <option value="environment">Environment</option>
-                            <option value="others">Others</option>
-                          </select>
-                          {validationErrors.domain && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.domain}
-                            </p>
-                          )}
+                            {/* Entity */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Entity *
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.entity}
+                                onChange={(e) =>
+                                  handleInputChange("entity", e.target.value)
+                                }
+                                placeholder="Who or what is the main subject?"
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.entity
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                required
+                              />
+                              {validationErrors.entity && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.entity}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Role */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Role *
+                              </label>
+                              <select
+                                value={formData.role}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "role",
+                                    e.target.value as RoleEnum
+                                  )
+                                }
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.role
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                required
+                              >
+                                <option value="">Select a role...</option>
+                                <option value="hero">Hero</option>
+                                <option value="villain">Villain</option>
+                                <option value="victim">Victim</option>
+                                <option value="other">Other</option>
+                              </select>
+                              {validationErrors.role && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.role}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Role Explanation */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Role Explanation *
+                              </label>
+                              <textarea
+                                value={formData.role_explanation}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "role_explanation",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Explain why this entity has this role..."
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.role_explanation
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                rows={4}
+                                required
+                              />
+                              {validationErrors.role_explanation && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.role_explanation}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Secondary Entity Section */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-secondary rounded-full"></div>
+                              Secondary Entity
+                            </h3>
+
+                            {/* Entity 2 */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Secondary Entity
+                              </label>
+                              <input
+                                type="text"
+                                value={formData.entity_2}
+                                onChange={(e) =>
+                                  handleInputChange("entity_2", e.target.value)
+                                }
+                                placeholder="Second entity or subject (optional)"
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.entity_2
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                              />
+                              {validationErrors.entity_2 && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.entity_2}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Role 2 */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Secondary Entity's Role
+                              </label>
+                              <select
+                                value={formData.role_2}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "role_2",
+                                    e.target.value as RoleEnum
+                                  )
+                                }
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.role_2
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                              >
+                                <option value="">Select a role...</option>
+                                <option value="hero">Hero</option>
+                                <option value="villain">Villain</option>
+                                <option value="victim">Victim</option>
+                                <option value="other">Other</option>
+                              </select>
+                              {validationErrors.role_2 && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.role_2}
+                                </p>
+                              )}
+                            </div>
+
+                            {/* Secondary Role Explanation */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Secondary Entity's Explanation
+                              </label>
+                              <textarea
+                                value={formData.role_explanation_2}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "role_explanation_2",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Explain why the secondary entity has this role..."
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.role_explanation_2
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                rows={4}
+                              />
+                              {validationErrors.role_explanation_2 && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.role_explanation_2}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right Column - Analysis Fields */}
+                        <div className="space-y-6">
+                          {/* Humor Explanation */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
+                              Humor Analysis
+                            </h3>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Humor Explanation *
+                              </label>
+                              <textarea
+                                value={formData.humor_explanation}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "humor_explanation",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="What makes this meme funny? Explain the humor..."
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.humor_explanation
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                rows={4}
+                                required
+                              />
+                              {validationErrors.humor_explanation && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.humor_explanation}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Domain Section */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-accent rounded-full"></div>
+                              Classification
+                            </h3>
+
+                            {/* Domain */}
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Domain *
+                              </label>
+                              <select
+                                value={formData.domain}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "domain",
+                                    e.target.value as DomainEnum
+                                  )
+                                }
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.domain
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                required
+                              >
+                                <option value="">Select a domain...</option>
+                                <option value="politics">Politics</option>
+                                <option value="education">Education</option>
+                                <option value="health">Health</option>
+                                <option value="religion">Religion</option>
+                                <option value="society">Society</option>
+                                <option value="pop_culture">Pop Culture</option>
+                                <option value="economy">Economy</option>
+                                <option value="environment">Environment</option>
+                                <option value="others">Others</option>
+                              </select>
+                              {validationErrors.domain && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.domain}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Image Description */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
+                              <div className="w-2 h-2 bg-accent rounded-full"></div>
+                              Image Analysis
+                            </h3>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Image Description *
+                              </label>
+                              <textarea
+                                value={formData.image_description}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    "image_description",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Describe what you see in the image..."
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.image_description
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                rows={4}
+                                required
+                              />
+                              {validationErrors.image_description && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.image_description}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Context */}
+                          <div className="bg-card/50 rounded-lg border p-6 space-y-4">
+                            <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
+                              <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+                              Context Analysis
+                            </h3>
+
+                            <div className="space-y-2">
+                              <label className="text-sm font-medium text-foreground">
+                                Context *
+                              </label>
+                              <textarea
+                                value={formData.context}
+                                onChange={(e) =>
+                                  handleInputChange("context", e.target.value)
+                                }
+                                placeholder="What is the broader context or background?"
+                                className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
+                                  validationErrors.context
+                                    ? "border-red-500 focus:ring-red-500"
+                                    : "border-border focus:ring-primary"
+                                }`}
+                                rows={4}
+                                required
+                              />
+                              {validationErrors.context && (
+                                <p className="text-sm text-red-500">
+                                  {validationErrors.context}
+                                </p>
+                              )}
+                            </div>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Image Description */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-accent rounded-full"></div>
-                          Image Analysis
-                        </h3>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Image Description *
-                          </label>
-                          <textarea
-                            value={formData.image_description}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "image_description",
-                                e.target.value
-                              )
-                            }
-                            placeholder="Describe what you see in the image..."
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.image_description
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={4}
-                            required
-                          />
-                          {validationErrors.image_description && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.image_description}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Humor Explanation */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-yellow-500 rounded-full"></div>
-                          Humor Analysis
-                        </h3>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Humor Explanation *
-                          </label>
-                          <textarea
-                            value={formData.humor_explanation}
-                            onChange={(e) =>
-                              handleInputChange(
-                                "humor_explanation",
-                                e.target.value
-                              )
-                            }
-                            placeholder="What makes this meme funny? Explain the humor..."
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.humor_explanation
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={4}
-                            required
-                          />
-                          {validationErrors.humor_explanation && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.humor_explanation}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Context */}
-                      <div className="bg-card/50 rounded-lg border p-6 space-y-4">
-                        <h3 className="text-lg font-bold text-foreground mb-4 flex items-center gap-2">
-                          <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                          Context Analysis
-                        </h3>
-
-                        <div className="space-y-2">
-                          <label className="text-sm font-medium text-foreground">
-                            Context *
-                          </label>
-                          <textarea
-                            value={formData.context}
-                            onChange={(e) =>
-                              handleInputChange("context", e.target.value)
-                            }
-                            placeholder="What is the broader context or background?"
-                            className={`w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 ${
-                              validationErrors.context
-                                ? "border-red-500 focus:ring-red-500"
-                                : "border-border focus:ring-primary"
-                            }`}
-                            rows={4}
-                            required
-                          />
-                          {validationErrors.context && (
-                            <p className="text-sm text-red-500">
-                              {validationErrors.context}
-                            </p>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Submit Buttons */}
+                      {/* Submit Buttons - Full Width */}
                       <div className="flex justify-end gap-4">
                         <button
                           type="button"
@@ -1987,280 +2086,135 @@ function AnnotationPageContent() {
                   )}
                 </form>
               </div>
+
+              {/* Footer for workspace tab */}
+              <div className="mt-12 pt-8">
+                <p className="text-sm text-muted-foreground text-center">
+                  made with ❤️ for thesis ig
+                </p>
+              </div>
             </div>
           )}
 
           {/* Status Table Tab */}
           {activeTab === "status" && (
             <div className="space-y-6">
-              {/* Status Summary */}
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-                {(() => {
-                  const counts = getStatusCounts();
-                  return (
-                    <>
-                      <div className="bg-card/50 rounded-lg border p-4 text-center">
-                        <div className="text-2xl font-bold text-green-500">
-                          {isLoadingStatus ? (
-                            <div className="w-8 h-8 bg-green-500/20 rounded animate-pulse mx-auto" />
-                          ) : (
-                            counts.completed
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Completed
-                        </div>
-                      </div>
-                      <div className="bg-card/50 rounded-lg border p-4 text-center">
-                        <div className="text-2xl font-bold text-purple-500">
-                          {isLoadingStatus ? (
-                            <div className="w-8 h-8 bg-purple-500/20 rounded animate-pulse mx-auto" />
-                          ) : (
-                            counts.reviewed
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Reviewed
-                        </div>
-                      </div>
-                      <div className="bg-card/50 rounded-lg border p-4 text-center">
-                        <div className="text-2xl font-bold text-yellow-500">
-                          {isLoadingStatus ? (
-                            <div className="w-8 h-8 bg-yellow-500/20 rounded animate-pulse mx-auto" />
-                          ) : (
-                            counts.skipped
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Skipped
-                        </div>
-                      </div>
-                      <div className="bg-card/50 rounded-lg border p-4 text-center">
-                        <div className="text-2xl font-bold text-gray-500">
-                          {isLoadingStatus ? (
-                            <div className="w-8 h-8 bg-gray-500/20 rounded animate-pulse mx-auto" />
-                          ) : (
-                            counts.pending
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Pending
-                        </div>
-                      </div>
-                      <div className="bg-card/50 rounded-lg border p-4 text-center">
-                        <div className="text-2xl font-bold text-primary">
-                          {isLoadingStatus ? (
-                            <div className="w-8 h-8 bg-primary/20 rounded animate-pulse mx-auto" />
-                          ) : (
-                            counts.total
-                          )}
-                        </div>
-                        <div className="text-sm text-muted-foreground">
-                          Total
-                        </div>
-                      </div>
-                    </>
-                  );
-                })()}
-              </div>
-
-              {/* Status Error Message */}
-              {statusError && (
-                <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
-                  <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                    <p className="text-sm text-red-500 font-medium">
-                      {statusError}
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => fetchStatusData(statusFilter, true)}
-                    disabled={isLoadingStatus}
-                    className="mt-2 text-xs text-red-500 hover:underline disabled:opacity-50"
-                  >
-                    {isLoadingStatus ? (
-                      <PixelLoader
-                        message="Retrying..."
-                        size="sm"
-                        variant="dots"
-                      />
-                    ) : (
-                      "Retry"
-                    )}
-                  </button>
-                </div>
-              )}
-
-              {/* Filter Options */}
-              <div className="bg-card/50 rounded-lg border p-4">
+              {/* Action Buttons */}
+              <div className="bg-card/50 rounded-lg border p-6">
                 <div className="flex items-center justify-between">
                   <h3 className="text-lg font-bold text-foreground">
-                    Annotation Status Table
+                    Data Management
                   </h3>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">
-                      Filter:
-                    </span>
-                    <div className="flex gap-2">
-                      {[
-                        { value: "all", label: "All" },
-                        { value: "completed", label: "Completed" },
-                        { value: "pending", label: "Pending" },
-                        { value: "in_progress", label: "In Progress" },
-                        { value: "skipped", label: "Skipped" },
-                      ].map((filter) => (
-                        <button
-                          key={filter.value}
-                          onClick={() => setStatusFilter(filter.value)}
-                          className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
-                            statusFilter === filter.value
-                              ? "bg-primary text-primary-foreground"
-                              : "bg-muted text-muted-foreground hover:bg-muted/80"
-                          }`}
-                        >
-                          {filter.label}
-                        </button>
-                      ))}
-                    </div>
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={handleExportCSV}
+                      disabled={isLoadingStatus}
+                      className="flex items-center gap-2 px-4 py-2 bg-chart-3/20 text-chart-3 border border-chart-3/30 rounded-lg font-medium hover:bg-chart-3/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoadingStatus ? (
+                        <PixelLoader
+                          message="Exporting..."
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Export CSV
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleExportJSON}
+                      disabled={isLoadingStatus}
+                      className="flex items-center gap-2 px-4 py-2 bg-chart-2/20 text-chart-2 border border-chart-2/30 rounded-lg font-medium hover:bg-chart-2/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoadingStatus ? (
+                        <PixelLoader
+                          message="Exporting..."
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          <FileText className="w-4 h-4" />
+                          Export JSON
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleClearAll}
+                      disabled={isLoadingStatus}
+                      className="flex items-center gap-2 px-4 py-2 bg-destructive/20 text-destructive border border-destructive/30 rounded-lg font-medium hover:bg-destructive/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoadingStatus ? (
+                        <PixelLoader
+                          message="Clearing..."
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          <Trash2 className="w-4 h-4" />
+                          Clear All
+                        </>
+                      )}
+                    </button>
                   </div>
                 </div>
                 <p className="text-sm text-muted-foreground mt-2">
-                  Click on any row to jump to that meme
+                  Export your annotations or clear all data for this folder
                 </p>
               </div>
 
-              {/* Status Table */}
-              <div className="bg-card/50 rounded-lg border overflow-hidden">
-                <div className="h-96 overflow-auto">
-                  {isLoadingStatus ? (
-                    <div className="flex items-center justify-center h-full">
-                      <DataLoader />
-                    </div>
-                  ) : statusData?.memes && statusData.memes.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="w-full min-w-[400px]">
-                        <thead className="bg-muted/50 sticky top-0 z-10">
-                          <tr>
-                            <th className="text-left p-3 text-sm font-medium text-foreground w-16">
-                              #
-                            </th>
-                            <th className="text-left p-3 text-sm font-medium text-foreground w-32">
-                              Image ID
-                            </th>
-                            <th className="text-left p-3 text-sm font-medium text-foreground w-24">
-                              Status
-                            </th>
-                            <th className="text-left p-3 text-sm font-medium text-foreground w-28">
-                              Updated
-                            </th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {statusData.memes.map((item: any, index: number) => (
-                            <tr
-                              key={item.id}
-                              className={`border-b border-border hover:bg-muted/30 cursor-pointer transition-colors ${
-                                selectedAnnotationId === item.id
-                                  ? "bg-primary/10 border-primary/30"
-                                  : ""
-                              }`}
-                              onClick={() => {
-                                loadSpecificAnnotation(item.id);
-                                setActiveTab("workspace");
-                              }}
-                            >
-                              <td className="p-3 text-sm text-muted-foreground">
-                                {index + 1}
-                              </td>
-                              <td className="p-3 text-sm text-foreground font-medium">
-                                {item.image_id}
-                              </td>
-                              <td className="p-3">
-                                <span
-                                  className={`inline-flex items-center justify-center px-2 py-1 rounded-full text-xs font-medium border w-16 ${getStatusColor(
-                                    item.annotation_status
-                                  )}`}
-                                >
-                                  {formatStatusBadge(item.annotation_status)}
-                                </span>
-                              </td>
-                              <td className="p-3 text-sm text-muted-foreground">
-                                {new Date(item.updated_at).toLocaleDateString()}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-center h-full">
-                      <div className="text-center">
-                        <p className="text-sm text-muted-foreground">
-                          No annotation data available
-                        </p>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+              <StatusTable
+                statusData={statusData}
+                isLoadingStatus={isLoadingStatus}
+                statusError={statusError}
+                statusFilter={statusFilter}
+                selectedAnnotationId={selectedAnnotationId}
+                onFilterChange={setStatusFilter}
+                onRetry={() => fetchStatusData(statusFilter, true)}
+                onRowClick={(itemId) => {
+                  loadSpecificAnnotation(itemId);
+                  setActiveTab("workspace");
+                }}
+                getStatusCounts={getStatusCounts}
+                getStatusColor={getStatusColor}
+                formatStatusBadge={formatStatusBadge}
+              />
 
-              {/* Action Buttons */}
-              <div className="flex flex-wrap gap-3 justify-center">
-                <button
-                  onClick={handleExportCSV}
-                  disabled={isLoadingStatus}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-primary text-primary-foreground border border-primary/20 rounded-lg font-medium hover:bg-primary/90 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
-                >
-                  <Download className="w-4 h-4" />
-                  {isLoadingStatus ? "Exporting..." : "Export CSV"}
-                </button>
-
-                <button
-                  onClick={handleExportJSON}
-                  disabled={isLoadingStatus}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-secondary text-secondary-foreground border border-secondary/20 rounded-lg font-medium hover:bg-secondary/80 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-secondary"
-                >
-                  <FileText className="w-4 h-4" />
-                  {isLoadingStatus ? "Exporting..." : "Export JSON"}
-                </button>
-
-                <button
-                  onClick={handleClearAll}
-                  disabled={isLoadingStatus}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-destructive text-destructive-foreground border border-destructive/20 rounded-lg font-medium hover:bg-destructive/90 transition-all duration-200 shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-destructive"
-                >
-                  {isLoadingStatus ? (
-                    <PixelLoader
-                      message="Clearing..."
-                      size="sm"
-                      variant="dots"
-                    />
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      Clear All
-                    </>
-                  )}
-                </button>
+              {/* Footer for status tab */}
+              <div className="mt-12 pt-8">
+                <p className="text-sm text-muted-foreground text-center">
+                  made with ❤️ for thesis ig
+                </p>
               </div>
             </div>
           )}
-
-          {/* Footer */}
-          <div className="mt-12 pt-8">
-            <p className="text-sm text-muted-foreground text-center">
-              made with ❤️ for thesis ig
-            </p>
-          </div>
         </div>
 
         {/* Image Modal */}
         {isImageModalOpen && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4">
+          <div
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (e.target === e.currentTarget) {
+                setIsImageModalOpen(false);
+              }
+            }}
+          >
             <div className="relative max-w-4xl max-h-[90vh] w-full">
               {/* Close Button */}
               <button
-                onClick={() => setIsImageModalOpen(false)}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setIsImageModalOpen(false);
+                }}
                 className="absolute top-4 right-4 p-2 bg-black/50 text-white rounded-lg hover:bg-black/70 transition-colors z-10"
               >
                 <X className="w-6 h-6" />
@@ -2280,144 +2234,31 @@ function AnnotationPageContent() {
           </div>
         )}
 
+        {/* API Setup Tab */}
+        {activeTab === "api-setup" && (
+          <APISetup
+            userName={userName}
+            folderName={folderName}
+            onKeySelected={handleApiKeySelected}
+          />
+        )}
+
         {/* Meme Grid Tab */}
         {activeTab === "grid" && (
-          <div className="space-y-6">
-            {/* Grid Header */}
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-bold text-foreground">
-                Meme Grid View
-              </h3>
-              <div className="flex items-center gap-4">
-                <span className="text-sm text-muted-foreground">
-                  Showing {getGridItems().length} of{" "}
-                  {statusData?.memes?.length || 0} memes
-                </span>
-              </div>
-            </div>
-
-            {/* Grid Error Message */}
-            {statusError && (
-              <div className="p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 bg-red-500 rounded-full"></div>
-                  <p className="text-sm text-red-500 font-medium">
-                    {statusError}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Grid Loading State */}
-            {isLoadingStatus && !statusData && (
-              <div className="flex items-center justify-center py-12">
-                <MemeLoader />
-              </div>
-            )}
-
-            {/* Meme Grid */}
-            {statusData?.memes && getGridItems().length > 0 && (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
-                {getGridItems().map((item: any) => (
-                  <div
-                    key={item.id}
-                    className={`relative group cursor-pointer rounded-lg overflow-hidden border-2 transition-all duration-300 hover:scale-105 hover:shadow-lg ${
-                      selectedAnnotationId === item.id
-                        ? "border-primary shadow-lg scale-105"
-                        : "border-border hover:border-primary/50"
-                    } ${getStatusOverlay(item.annotation_status)}`}
-                    onClick={() => {
-                      loadSpecificAnnotation(item.id);
-                      setActiveTab("workspace");
-                    }}
-                  >
-                    {/* Image */}
-                    <div className="aspect-square relative">
-                      {item.image_url ? (
-                        <Image
-                          src={item.image_url}
-                          alt={item.image_id || "Meme"}
-                          fill
-                          className="object-cover"
-                          sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
-                        />
-                      ) : (
-                        <div className="w-full h-full bg-gray-200 flex items-center justify-center">
-                          <div className="text-gray-500 text-sm text-center p-2">
-                            <ImageIcon className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                            <div className="text-xs">
-                              {item.image_id || "No Image"}
-                            </div>
-                            <div className="text-xs mt-1">
-                              Image not available
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Status Color Overlay */}
-                      {getStatusColorOverlay(item.annotation_status) && (
-                        <div
-                          className={`absolute inset-0 ${getStatusColorOverlay(
-                            item.annotation_status
-                          )} transition-opacity duration-300`}
-                        />
-                      )}
-
-                      {/* Hover Overlay */}
-                      <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors duration-300 flex items-center justify-center">
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                          <div className="bg-white/90 rounded-full p-2">
-                            <Edit3 className="w-5 h-5 text-primary" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Meme Info */}
-                    <div className="p-3 bg-card">
-                      <div className="text-sm font-medium text-foreground truncate">
-                        {item.image_id}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-1">
-                        {formatStatusBadge(item.annotation_status)}
-                      </div>
-                      {item.updated_at && (
-                        <div className="text-xs text-muted-foreground mt-1">
-                          {new Date(item.updated_at).toLocaleDateString()}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Empty State */}
-            {statusData?.memes && getGridItems().length === 0 && (
-              <div className="text-center py-12">
-                <div className="text-muted-foreground">
-                  <Grid3X3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                  <p className="text-lg font-medium">No memes found</p>
-                  <p className="text-sm">
-                    Try adjusting your filter or check back later.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Load More Indicator */}
-            {statusData?.memes &&
-              getGridItems().length < (statusData.memes.length || 0) && (
-                <div className="text-center py-4">
-                  <PixelLoader
-                    message="Scroll down to load more memes..."
-                    size="sm"
-                    variant="dots"
-                  />
-                </div>
-              )}
-          </div>
+          <MemeGrid
+            statusData={statusData}
+            isLoadingStatus={isLoadingStatus}
+            statusError={statusError}
+            selectedAnnotationId={selectedAnnotationId}
+            onItemClick={(itemId) => {
+              loadSpecificAnnotation(itemId);
+              setActiveTab("workspace");
+            }}
+            getGridItems={getGridItems}
+            getStatusOverlay={getStatusOverlay}
+            getStatusColorOverlay={getStatusColorOverlay}
+            formatStatusBadge={formatStatusBadge}
+          />
         )}
       </div>
     </LoadingOverlay>
