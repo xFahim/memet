@@ -245,26 +245,28 @@ export default function APISetup({
 
       {/* Test Result Display */}
       {testResult && (
-        <div
-          className={`p-4 border rounded-lg ${
-            testResult.success
-              ? "bg-green-500/10 border-green-500/30"
-              : "bg-red-500/10 border-red-500/30"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            {testResult.success ? (
-              <CheckCircle className="w-4 h-4 text-green-500" />
-            ) : (
-              <XCircle className="w-4 h-4 text-red-500" />
-            )}
-            <p
-              className={`text-sm font-medium ${
-                testResult.success ? "text-green-500" : "text-red-500"
-              }`}
-            >
-              {testResult.message}
-            </p>
+        <div className="flex justify-center mb-4">
+          <div
+            className={`p-4 border rounded-lg max-w-md w-full ${
+              testResult.success
+                ? "bg-green-500/10 border-green-500/30"
+                : "bg-red-500/10 border-red-500/30"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              {testResult.success ? (
+                <CheckCircle className="w-4 h-4 text-green-500 flex-shrink-0" />
+              ) : (
+                <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              )}
+              <p
+                className={`text-sm font-medium break-words ${
+                  testResult.success ? "text-green-500" : "text-red-500"
+                }`}
+              >
+                {testResult.message}
+              </p>
+            </div>
           </div>
         </div>
       )}

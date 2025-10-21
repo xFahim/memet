@@ -13,9 +13,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { error: "Gemini API key not configured" },
+        { status: 500 }
+      );
+    }
+
     // Initialize Gemini AI
     const ai = new GoogleGenAI({
-      apiKey: "AIzaSyBhOyzmeQ2DD2Xvj8_ziBgrKu4H-1yDmYk",
+      apiKey: apiKey,
     });
 
     // Use custom prompt if provided, otherwise use simple test
