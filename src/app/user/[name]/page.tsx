@@ -725,6 +725,8 @@ export default function UserPage() {
                               width={64}
                               height={64}
                               className="w-full h-full object-cover"
+                              quality={60}
+                              loading="lazy"
                             />
                           </div>
 

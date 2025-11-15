@@ -48,6 +48,7 @@ export function MemberAvatar({
             width={128}
             height={128}
             className="w-full h-full object-cover"
+            quality={70}
             priority
           />
         </div>

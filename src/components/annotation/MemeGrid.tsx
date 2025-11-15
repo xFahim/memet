@@ -83,6 +83,8 @@ export default function MemeGrid({
                     fill
                     className="object-cover"
                     sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, (max-width: 1280px) 25vw, 20vw"
+                    quality={60}
+                    loading="lazy"
                   />
                 ) : (
                   <div className="w-full h-full bg-gray-200 flex items-center justify-center">

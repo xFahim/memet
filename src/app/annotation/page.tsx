@@ -1578,6 +1578,8 @@ function AnnotationPageContent() {
                                   alt="Meme to annotate"
                                   fill
                                   className="object-contain"
+                                  sizes="100vw"
+                                  quality={75}
                                 />
                                 {/* Zoom Button */}
                                 <button
@@ -1731,6 +1733,8 @@ function AnnotationPageContent() {
                                   alt="Meme to annotate"
                                   fill
                                   className="object-contain"
+                                  sizes="100vw"
+                                  quality={75}
                                 />
                                 {/* Zoom Button */}
                                 <button
@@ -2443,6 +2447,7 @@ function AnnotationPageContent() {
                   width={800}
                   height={600}
                   className="w-full h-auto max-h-[90vh] object-contain rounded-lg"
+                  quality={85}
                 />
               </div>
             </div>
