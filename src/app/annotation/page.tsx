@@ -21,6 +21,8 @@ import {
   Loader2,
   Edit,
   Check,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   PixelLoader,
@@ -178,7 +180,7 @@ function AnnotationPageContent() {
     null
   );
   const [showRawResponse, setShowRawResponse] = useState(false);
-  const [selectedApiKey, setSelectedApiKey] = useState<string>("");
+  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
   const [statusData, setStatusData] = useState<any>(null);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
   const [statusError, setStatusError] = useState<string | null>(null);
@@ -196,10 +198,11 @@ function AnnotationPageContent() {
   const userName = searchParams.get("user") || "";
   const folderName = searchParams.get("folder") || "";
 
-  // Handle API key selection
+  // Handle API key selection - only track if key exists, not the actual value
   const handleApiKeySelected = useCallback(
     (keyId: string, keyValue: string) => {
-      setSelectedApiKey(keyValue);
+      // Only track if a key exists (keyId is not empty), never store the actual key value
+      setHasApiKey(!!keyId);
     },
     []
   );
@@ -577,6 +580,7 @@ function AnnotationPageContent() {
           context: formData.context,
           domain: formData.domain || null,
           free_form: formData.free_form,
+          markAsCompleted: formTab === "ai", // Mark as completed only when saving from AI form
         }),
       });
 
@@ -590,79 +594,99 @@ function AnnotationPageContent() {
       setSaveSuccess(true);
       setSaveError(null);
 
-      // Reset form after successful submission
-      setFormData({
-        image_description: "",
-        entity: "",
-        role: "",
-        role_explanation: "",
-        entity_2: "",
-        role_2: "",
-        role_explanation_2: "",
-        humor_explanation: "",
-        context: "",
-        domain: "",
-        free_form: "",
-      });
-
       // Clear validation errors
       setValidationErrors({});
 
-      // Clear selected annotation ID to indicate we're moving to next
-      setSelectedAnnotationId(null);
-
-      // Only fetch the next annotation if the cursor moved (was in_progress)
-      if (data.movedCursor) {
-        try {
-          const nextResponse = await fetch(
-            `/api/next-annotation?annotator=${encodeURIComponent(
-              userName
-            )}&folder=${encodeURIComponent(folderName)}`
-          );
-
-          const nextData = await nextResponse.json();
-
-          if (nextResponse.ok) {
-            setApiResponse(nextData);
-          } else {
-            // If no more annotations, show a message
-            if (nextData.message === "No more items") {
-              setApiResponse(null);
-              setApiError("No more annotations to process! 🎉");
-            } else {
-              setApiError(nextData.error || "Failed to fetch next annotation");
-            }
-          }
-        } catch (nextError: any) {
-          console.error("Error fetching next annotation:", nextError);
-          setApiError("Annotation saved, but failed to load next item");
-        }
-      } else {
-        // If cursor didn't move, fetch the current in-progress annotation
-        try {
-          const currentResponse = await fetch(
-            `/api/next-annotation?annotator=${encodeURIComponent(
-              userName
-            )}&folder=${encodeURIComponent(folderName)}`
-          );
-
-          const currentData = await currentResponse.json();
-
-          if (currentResponse.ok) {
-            setApiResponse(currentData);
-          } else {
-            // If no current annotation, clear the response
-            setApiResponse(null);
-          }
-        } catch (currentError: any) {
-          console.error("Error fetching current annotation:", currentError);
-        }
+      // If saving from human form, switch to AI form tab
+      if (formTab === "human") {
+        // Don't reset form data - keep it for AI form
+        // Don't clear selected annotation ID - stay on current annotation
+        // Don't fetch next annotation - stay on current meme
 
         // Show success message
-        setSaveSuccess(true);
         setTimeout(() => {
           setSaveSuccess(false);
         }, 3000);
+
+        // Switch to AI form tab to fill up extra details with AI
+        setFormTab("ai");
+      } else {
+        // If saving from AI form, mark as completed and move to next meme
+        // Reset form after successful submission
+        setFormData({
+          image_description: "",
+          entity: "",
+          role: "",
+          role_explanation: "",
+          entity_2: "",
+          role_2: "",
+          role_explanation_2: "",
+          humor_explanation: "",
+          context: "",
+          domain: "",
+          free_form: "",
+        });
+
+        // Clear selected annotation ID to indicate we're moving to next
+        setSelectedAnnotationId(null);
+
+        // Only fetch the next annotation if the cursor moved (was in_progress)
+        if (data.movedCursor) {
+          try {
+            const nextResponse = await fetch(
+              `/api/next-annotation?annotator=${encodeURIComponent(
+                userName
+              )}&folder=${encodeURIComponent(folderName)}`
+            );
+
+            const nextData = await nextResponse.json();
+
+            if (nextResponse.ok) {
+              setApiResponse(nextData);
+              // Switch back to human form for next annotation
+              setFormTab("human");
+            } else {
+              // If no more annotations, show a message
+              if (nextData.message === "No more items") {
+                setApiResponse(null);
+                setApiError("No more annotations to process! 🎉");
+              } else {
+                setApiError(nextData.error || "Failed to fetch next annotation");
+              }
+            }
+          } catch (nextError: any) {
+            console.error("Error fetching next annotation:", nextError);
+            setApiError("Annotation saved, but failed to load next item");
+          }
+        } else {
+          // If cursor didn't move, fetch the current in-progress annotation
+          try {
+            const currentResponse = await fetch(
+              `/api/next-annotation?annotator=${encodeURIComponent(
+                userName
+              )}&folder=${encodeURIComponent(folderName)}`
+            );
+
+            const currentData = await currentResponse.json();
+
+            if (currentResponse.ok) {
+              setApiResponse(currentData);
+              // Switch back to human form
+              setFormTab("human");
+            } else {
+              // If no current annotation, clear the response
+              setApiResponse(null);
+            }
+          } catch (currentError: any) {
+            console.error("Error fetching current annotation:", currentError);
+          }
+
+          // Show success message
+          setSaveSuccess(true);
+          setTimeout(() => {
+            setSaveSuccess(false);
+          }, 3000);
+        }
       }
 
       // Always refresh status table data to reflect the changes
@@ -674,6 +698,73 @@ function AnnotationPageContent() {
       );
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleNavigate = async (direction: "prev" | "next") => {
+    // Check if we have the required data
+    if (!apiResponse?.annotation?.id || !userName || !folderName) {
+      setApiError("Missing annotation data or user information");
+      return;
+    }
+
+    setIsLoadingApi(true);
+    setApiError(null);
+    setSaveError(null);
+    setSaveSuccess(false);
+    setSkipSuccess(false);
+
+    try {
+      const response = await fetch(
+        `/api/navigate-annotation?annotationId=${encodeURIComponent(
+          apiResponse.annotation.id
+        )}&annotator=${encodeURIComponent(userName)}&folder=${encodeURIComponent(
+          folderName
+        )}&direction=${direction}`
+      );
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP error! status: ${response.status}`);
+      }
+
+      if (data.message) {
+        // No previous/next annotation available
+        setApiError(data.message);
+        return;
+      }
+
+      // Load the annotation data into form
+      if (data.annotation) {
+        setApiResponse(data);
+        setSelectedAnnotationId(data.annotation.id);
+
+        // Populate form with existing annotation data if available
+        setFormData({
+          image_description: data.annotation.image_description || "",
+          entity: data.annotation.entity || "",
+          role: (data.annotation.role as RoleEnum) || "",
+          role_explanation: data.annotation.role_explanation || "",
+          entity_2: data.annotation.entity_2 || "",
+          role_2: (data.annotation.role_2 as RoleEnum) || "",
+          role_explanation_2: data.annotation.role_explanation_2 || "",
+          humor_explanation: data.annotation.humor_explanation || "",
+          context: data.annotation.context || "",
+          domain: (data.annotation.domain as DomainEnum) || "",
+          free_form: data.annotation.free_form || "",
+        });
+
+        // Switch to human form tab when navigating
+        setFormTab("human");
+      }
+    } catch (error: any) {
+      console.error("Navigation Error:", error);
+      setApiError(
+        error.message || `Failed to navigate ${direction === "prev" ? "back" : "forward"}`
+      );
+    } finally {
+      setIsLoadingApi(false);
     }
   };
 
@@ -793,6 +884,19 @@ function AnnotationPageContent() {
       return;
     }
 
+    // Check if user has configured an API key (server will verify, but check here for UX)
+    if (!hasApiKey) {
+      setAiFillupError(
+        "No API key configured. Please set up your Gemini API key in the API Setup tab first."
+      );
+      return;
+    }
+
+    if (!userName) {
+      setAiFillupError("User name is required");
+      return;
+    }
+
     setIsGeneratingFillup(true);
     setAiFillupError(null);
     setAiFillupSuccess(false);
@@ -807,7 +911,7 @@ function AnnotationPageContent() {
         body: JSON.stringify({
           imageUrl: apiResponse.image_url,
           context: formData.free_form,
-          apiKey: selectedApiKey,
+          for_user: userName, // Pass user name instead of API key
         }),
       });
 
@@ -1091,6 +1195,54 @@ function AnnotationPageContent() {
     }
   };
 
+  const handleExportImageCSV = async () => {
+    if (!userName || !folderName) {
+      setStatusError("Missing user or folder information");
+      return;
+    }
+
+    try {
+      setIsLoadingStatus(true);
+      setStatusError(null);
+
+      const response = await fetch(
+        `/api/export-image-urls-csv?annotator=${encodeURIComponent(
+          userName
+        )}&folder=${encodeURIComponent(folderName)}`
+      );
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || "Failed to export image URLs");
+      }
+
+      // Get the filename from the Content-Disposition header
+      const contentDisposition = response.headers.get("Content-Disposition");
+      const filename = contentDisposition
+        ? contentDisposition.split("filename=")[1]?.replace(/"/g, "")
+        : `image-urls-${userName}_${folderName}.csv`;
+
+      // Create a blob and download it
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (error: any) {
+      console.error("Export error:", error);
+      setStatusError(error.message || "Failed to export image URLs");
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  };
+
   const handleClearAll = async () => {
     if (!userName || !folderName) {
       setStatusError("Missing user or folder information");
@@ -1289,6 +1441,50 @@ function AnnotationPageContent() {
             <div className="max-w-4xl mx-auto">
               {/* Form Interface */}
               <div className="space-y-6">
+                {/* Navigation Buttons */}
+                {apiResponse?.annotation?.id && (
+                  <div className="flex justify-center items-center gap-6">
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate("prev")}
+                      disabled={isLoadingApi}
+                      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed underline-offset-4 hover:underline"
+                    >
+                      {isLoadingApi ? (
+                        <PixelLoader
+                          message=""
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          <ChevronLeft className="w-4 h-4" />
+                          Previous
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleNavigate("next")}
+                      disabled={isLoadingApi}
+                      className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50 disabled:cursor-not-allowed underline-offset-4 hover:underline"
+                    >
+                      {isLoadingApi ? (
+                        <PixelLoader
+                          message=""
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          Next
+                          <ChevronRight className="w-4 h-4" />
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
+
                 {/* Form Tab Navigation */}
                 <div className="bg-card/50 rounded-lg border p-1">
                   <div className="flex">
@@ -2140,6 +2336,25 @@ function AnnotationPageContent() {
                         <>
                           <FileText className="w-4 h-4" />
                           Export JSON
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      onClick={handleExportImageCSV}
+                      disabled={isLoadingStatus}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-500/20 text-blue-500 border border-blue-500/30 rounded-lg font-medium hover:bg-blue-500/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isLoadingStatus ? (
+                        <PixelLoader
+                          message="Exporting..."
+                          size="sm"
+                          variant="dots"
+                        />
+                      ) : (
+                        <>
+                          <Download className="w-4 h-4" />
+                          Get Image CSV
                         </>
                       )}
                     </button>

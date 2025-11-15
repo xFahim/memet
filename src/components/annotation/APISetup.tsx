@@ -21,6 +21,7 @@ import {
 interface GeminiKey {
   id: string;
   name: string;
+  for_user: string;
   key: string;
   created_at: string;
 }
@@ -37,63 +38,64 @@ export default function APISetup({
   onKeySelected,
 }: APISetupProps) {
   // State management
-  const [keys, setKeys] = useState<GeminiKey[]>([]);
-  const [selectedKeyId, setSelectedKeyId] = useState<string>("");
-  const [isLoadingKeys, setIsLoadingKeys] = useState(true);
-  const [testingKeyId, setTestingKeyId] = useState<string | null>(null);
+  const [key, setKey] = useState<GeminiKey | null>(null);
+  const [isLoadingKey, setIsLoadingKey] = useState(true);
+  const [isTestingKey, setIsTestingKey] = useState(false);
   const [testResult, setTestResult] = useState<{
     success: boolean;
     message: string;
-    keyId?: string;
   } | null>(null);
-  const [isEditingKey, setIsEditingKey] = useState<string | null>(null);
+  const [isEditingKey, setIsEditingKey] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [newKeyValue, setNewKeyValue] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  // Load keys on component mount
+  // Load key on component mount
   useEffect(() => {
-    loadKeys();
-  }, []);
+    loadKey();
+  }, [userName]);
 
-  // Notify parent when selected key changes
+  // Notify parent when key changes (only pass key ID, not the actual key value)
   useEffect(() => {
-    if (selectedKeyId && onKeySelected) {
-      const selectedKey = keys.find((key) => key.id === selectedKeyId);
-      if (selectedKey) {
-        onKeySelected(selectedKeyId, selectedKey.key);
-      }
+    if (key && onKeySelected) {
+      // Only pass key ID, not the actual key value for security
+      onKeySelected(key.id, key.id); // Pass ID twice to maintain interface compatibility
     }
-  }, [selectedKeyId, keys, onKeySelected]);
+  }, [key, onKeySelected]);
 
-  const loadKeys = async () => {
-    setIsLoadingKeys(true);
+  const loadKey = async () => {
+    if (!userName) {
+      setIsLoadingKey(false);
+      return;
+    }
+
+    setIsLoadingKey(true);
     setError(null);
 
     try {
-      const response = await fetch("/api/gemini-keys");
+      const response = await fetch(
+        `/api/gemini-keys?for_user=${encodeURIComponent(userName)}`
+      );
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to load keys");
+        throw new Error(data.error || "Failed to load key");
       }
 
-      setKeys(data.keys || []);
-
-      // Auto-select first key if none selected
-      if (data.keys && data.keys.length > 0 && !selectedKeyId) {
-        setSelectedKeyId(data.keys[0].id);
-      }
+      setKey(data.key || null);
     } catch (error: any) {
-      console.error("Error loading keys:", error);
-      setError(error.message || "Failed to load API keys");
+      console.error("Error loading key:", error);
+      setError(error.message || "Failed to load API key");
+      setKey(null);
     } finally {
-      setIsLoadingKeys(false);
+      setIsLoadingKey(false);
     }
   };
 
-  const testKey = async (keyId: string) => {
-    setTestingKeyId(keyId);
+  const testKey = async () => {
+    if (!key || !userName) return;
+
+    setIsTestingKey(true);
     setTestResult(null);
     setError(null);
 
@@ -103,7 +105,7 @@ export default function APISetup({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ keyId }),
+        body: JSON.stringify({ for_user: userName }),
       });
 
       const data = await response.json();
@@ -115,21 +117,24 @@ export default function APISetup({
       setTestResult({
         success: true,
         message: data.message || "Key test successful!",
-        keyId,
       });
     } catch (error: any) {
       console.error("Key test error:", error);
       setTestResult({
         success: false,
         message: error.message || "Key test failed",
-        keyId,
       });
     } finally {
-      setTestingKeyId(null);
+      setIsTestingKey(false);
     }
   };
 
-  const addKey = async () => {
+  const saveKey = async () => {
+    if (!userName) {
+      setError("User name is required");
+      return;
+    }
+
     if (!newKeyName.trim() || !newKeyValue.trim()) {
       setError("Both name and key are required");
       return;
@@ -144,26 +149,38 @@ export default function APISetup({
         body: JSON.stringify({
           name: newKeyName.trim(),
           key: newKeyValue.trim(),
+          for_user: userName,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.error || "Failed to add key");
+        throw new Error(data.error || "Failed to save key");
       }
 
-      // Reset form and reload keys
+      // Reset form and reload key
       setNewKeyName("");
       setNewKeyValue("");
-      await loadKeys();
+      setIsEditingKey(false);
+      await loadKey();
     } catch (error: any) {
-      console.error("Error adding key:", error);
-      setError(error.message || "Failed to add API key");
+      console.error("Error saving key:", error);
+      setError(error.message || "Failed to save API key");
     }
   };
 
-  const updateKey = async (keyId: string, name: string, key: string) => {
+  const updateKey = async () => {
+    if (!userName) {
+      setError("User name is required");
+      return;
+    }
+
+    if (!newKeyName.trim() || !newKeyValue.trim()) {
+      setError("Both name and key are required");
+      return;
+    }
+
     try {
       const response = await fetch("/api/gemini-keys", {
         method: "PUT",
@@ -171,9 +188,9 @@ export default function APISetup({
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          id: keyId,
-          name: name.trim(),
-          key: key.trim(),
+          for_user: userName,
+          name: newKeyName.trim(),
+          key: newKeyValue.trim(),
         }),
       });
 
@@ -183,15 +200,22 @@ export default function APISetup({
         throw new Error(data.error || "Failed to update key");
       }
 
-      setIsEditingKey(null);
-      await loadKeys();
+      setIsEditingKey(false);
+      setNewKeyName("");
+      setNewKeyValue("");
+      await loadKey();
     } catch (error: any) {
       console.error("Error updating key:", error);
       setError(error.message || "Failed to update API key");
     }
   };
 
-  const deleteKey = async (keyId: string) => {
+  const deleteKey = async () => {
+    if (!userName) {
+      setError("User name is required");
+      return;
+    }
+
     if (
       !confirm(
         "Are you sure you want to delete this API key? This action cannot be undone."
@@ -206,7 +230,7 @@ export default function APISetup({
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ id: keyId }),
+        body: JSON.stringify({ for_user: userName }),
       });
 
       const data = await response.json();
@@ -215,19 +239,13 @@ export default function APISetup({
         throw new Error(data.error || "Failed to delete key");
       }
 
-      // If deleted key was selected, clear selection
-      if (selectedKeyId === keyId) {
-        setSelectedKeyId("");
-      }
-
-      await loadKeys();
+      setKey(null);
+      await loadKey();
     } catch (error: any) {
       console.error("Error deleting key:", error);
       setError(error.message || "Failed to delete API key");
     }
   };
-
-  const selectedKey = keys.find((key) => key.id === selectedKeyId);
 
   return (
     <div className="space-y-6">
@@ -235,10 +253,12 @@ export default function APISetup({
 
       {/* Error Display */}
       {error && (
-        <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg">
-          <div className="flex items-center gap-2">
-            <XCircle className="w-4 h-4 text-red-500" />
-            <p className="text-sm text-red-500 font-medium">{error}</p>
+        <div className="flex justify-center mb-4">
+          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg max-w-md w-full">
+            <div className="flex items-center gap-2">
+              <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
+              <p className="text-sm text-red-500 font-medium break-words">{error}</p>
+            </div>
           </div>
         </div>
       )}
@@ -274,173 +294,107 @@ export default function APISetup({
       {/* Main Content Grid */}
       <div className="flex justify-center">
         <div className="grid grid-cols-1 lg:grid-cols-[2fr_1fr] gap-6 max-w-6xl">
-          {/* Left Column - Keys Table and Add Form */}
+          {/* Left Column - Key Management */}
           <div className="space-y-6">
-            {/* Keys Table */}
+            {/* Current Key Display */}
             <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-lg font-semibold text-foreground flex items-center gap-2">
                   <Key className="w-5 h-5" />
-                  API Keys
+                  Your API Key
                 </h4>
-                {selectedKey && (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="secondary" className="text-xs">
-                      Selected: {selectedKey.name}
-                    </Badge>
-                  </div>
+                {key && (
+                  <Badge variant="secondary" className="text-xs">
+                    Configured
+                  </Badge>
                 )}
               </div>
 
-              {isLoadingKeys ? (
+              {isLoadingKey ? (
                 <div className="flex items-center justify-center py-8">
                   <PixelLoader
-                    message="Loading keys..."
+                    message="Loading key..."
                     size="sm"
                     variant="dots"
                   />
                 </div>
-              ) : (
-                <div className="border rounded-lg overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead className="bg-muted/50">
-                        <tr>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-foreground">
-                            Name
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-foreground">
-                            Key Preview
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-foreground">
-                            Created
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-foreground">
-                            Status
-                          </th>
-                          <th className="px-4 py-3 text-left text-sm font-medium text-foreground">
-                            Actions
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-border">
-                        {keys.length === 0 ? (
-                          <tr>
-                            <td
-                              colSpan={5}
-                              className="px-4 py-8 text-center text-muted-foreground"
-                            >
-                              <Key className="w-8 h-8 mx-auto mb-2 opacity-50" />
-                              No API keys found. Add your first key below.
-                            </td>
-                          </tr>
-                        ) : (
-                          keys.map((key) => (
-                            <tr
-                              key={key.id}
-                              className={`hover:bg-muted/30 transition-colors ${
-                                selectedKeyId === key.id ? "bg-primary/5" : ""
-                              }`}
-                            >
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <span className="font-medium text-foreground">
-                                    {key.name}
-                                  </span>
-                                  {selectedKeyId === key.id && (
-                                    <Badge
-                                      variant="secondary"
-                                      className="text-xs"
-                                    >
-                                      Selected
-                                    </Badge>
-                                  )}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <code className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded">
-                                  {key.key.substring(0, 20)}...
-                                </code>
-                              </td>
-                              <td className="px-4 py-3 text-sm text-muted-foreground">
-                                {new Date(key.created_at).toLocaleDateString()}
-                              </td>
-                              <td className="px-4 py-3">
-                                <Button
-                                  onClick={() => setSelectedKeyId(key.id)}
-                                  size="sm"
-                                  variant={
-                                    selectedKeyId === key.id
-                                      ? "default"
-                                      : "outline"
-                                  }
-                                >
-                                  {selectedKeyId === key.id
-                                    ? "Selected"
-                                    : "Select"}
-                                </Button>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <Button
-                                    onClick={() => testKey(key.id)}
-                                    size="sm"
-                                    variant="outline"
-                                    disabled={testingKeyId !== null}
-                                    className="flex items-center gap-1"
-                                  >
-                                    {testingKeyId === key.id ? (
-                                      <PixelLoader size="sm" variant="dots" />
-                                    ) : (
-                                      <>
-                                        <TestTube className="w-3 h-3" />
-                                        Test
-                                      </>
-                                    )}
-                                  </Button>
-                                  <Button
-                                    onClick={() => {
-                                      setIsEditingKey(key.id);
-                                      setNewKeyName(key.name);
-                                      setNewKeyValue(key.key);
-                                    }}
-                                    size="sm"
-                                    variant="outline"
-                                    className="flex items-center gap-1"
-                                  >
-                                    <Edit className="w-3 h-3" />
-                                  </Button>
-                                  <Button
-                                    onClick={() => deleteKey(key.id)}
-                                    size="sm"
-                                    variant="outline"
-                                    className="flex items-center gap-1 text-red-500 hover:text-red-600"
-                                  >
-                                    <Trash2 className="w-3 h-3" />
-                                  </Button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+              ) : key ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Key Name
+                    </label>
+                    <p className="text-foreground font-medium">{key.name}</p>
                   </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Key Status
+                    </label>
+                    <code className="text-xs text-muted-foreground font-mono bg-muted/50 px-2 py-1 rounded block">
+                      ✓ Configured (hidden for security)
+                    </code>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Created
+                    </label>
+                    <p className="text-sm text-muted-foreground">
+                      {new Date(key.created_at).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 pt-4">
+                    <Button
+                      onClick={() => {
+                        setIsEditingKey(true);
+                        setNewKeyName(key.name);
+                        setNewKeyValue(""); // Don't pre-fill key value for security - user must re-enter
+                      }}
+                      variant="outline"
+                      className="flex items-center gap-1"
+                    >
+                      <Edit className="w-4 h-4" />
+                      Edit
+                    </Button>
+                    <Button
+                      onClick={deleteKey}
+                      variant="outline"
+                      className="flex items-center gap-1 text-red-500 hover:text-red-600"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-8">
+                  <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+                  <p className="text-muted-foreground mb-4">
+                    No API key configured. Add your key below.
+                  </p>
                 </div>
               )}
             </Card>
 
-            {/* Add New Key Form */}
+            {/* Add/Edit Key Form */}
             <Card className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h4 className="text-lg font-semibold text-foreground flex items-center gap-2">
-                  <Plus className="w-5 h-5" />
-                  Add New Key
+                  {key ? (
+                    <>
+                      <Edit className="w-5 h-5" />
+                      Edit Key
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-5 h-5" />
+                      Add API Key
+                    </>
+                  )}
                 </h4>
-                {isEditingKey && (
+                {isEditingKey && key && (
                   <Button
                     onClick={() => {
-                      setIsEditingKey(null);
+                      setIsEditingKey(false);
                       setNewKeyName("");
                       setNewKeyValue("");
                     }}
@@ -453,71 +407,69 @@ export default function APISetup({
                 )}
               </div>
 
-              <div className="space-y-4">
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-2 block">
-                    Key Name *
-                  </label>
-                  <input
-                    type="text"
-                    value={newKeyName}
-                    onChange={(e) => setNewKeyName(e.target.value)}
-                    placeholder="e.g., My Gemini Key, Production Key"
-                    className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  />
-                </div>
+              {(isEditingKey || !key) && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      Key Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={newKeyName}
+                      onChange={(e) => setNewKeyName(e.target.value)}
+                      placeholder="e.g., My Gemini Key, Production Key"
+                      className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    />
+                  </div>
 
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-2 block">
-                    API Key *
-                  </label>
-                  <textarea
-                    value={newKeyValue}
-                    onChange={(e) => setNewKeyValue(e.target.value)}
-                    placeholder="Paste your Gemini API key here..."
-                    className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                    rows={3}
-                  />
-                </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">
+                      API Key *
+                    </label>
+                    <textarea
+                      value={newKeyValue}
+                      onChange={(e) => setNewKeyValue(e.target.value)}
+                      placeholder="Paste your Gemini API key here..."
+                      className="w-full p-3 border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      rows={3}
+                    />
+                  </div>
 
-                <div className="flex gap-3">
-                  <Button
-                    onClick={
-                      isEditingKey
-                        ? () => updateKey(isEditingKey, newKeyName, newKeyValue)
-                        : addKey
-                    }
-                    className="flex items-center gap-2"
-                    disabled={!newKeyName.trim() || !newKeyValue.trim()}
-                  >
-                    <Save className="w-4 h-4" />
-                    {isEditingKey ? "Update Key" : "Add Key"}
-                  </Button>
-                  {isEditingKey && (
+                  <div className="flex gap-3">
                     <Button
-                      onClick={() => {
-                        setIsEditingKey(null);
-                        setNewKeyName("");
-                        setNewKeyValue("");
-                      }}
-                      variant="outline"
+                      onClick={isEditingKey ? updateKey : saveKey}
+                      className="flex items-center gap-2"
+                      disabled={!newKeyName.trim() || !newKeyValue.trim()}
                     >
-                      Cancel
+                      <Save className="w-4 h-4" />
+                      {isEditingKey ? "Update Key" : "Save Key"}
                     </Button>
-                  )}
+                    {isEditingKey && (
+                      <Button
+                        onClick={() => {
+                          setIsEditingKey(false);
+                          setNewKeyName("");
+                          setNewKeyValue("");
+                        }}
+                        variant="outline"
+                      >
+                        Cancel
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </Card>
           </div>
 
-          {/* Right Column - Selected Key Info and API Information */}
+          {/* Right Column - Key Info and API Information */}
           <div className="space-y-6">
-            {/* Selected Key Info */}
-            {selectedKey ? (
+            {/* Key Details */}
+            {key ? (
               <Card className="p-6">
                 <h4 className="text-lg font-semibold text-foreground mb-4 flex items-center gap-2">
                   <CheckCircle className="w-5 h-5 text-green-500" />
-                  Selected Key Details
+                  Key Details
                 </h4>
                 <div className="space-y-4">
                   <div>
@@ -525,15 +477,15 @@ export default function APISetup({
                       Name:
                     </label>
                     <p className="text-foreground font-medium">
-                      {selectedKey.name}
+                      {key.name}
                     </p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-foreground">
-                      Key:
+                      Key Status:
                     </label>
-                    <p className="text-xs text-muted-foreground font-mono bg-muted/50 p-2 rounded break-all whitespace-pre-wrap">
-                      {selectedKey.key}
+                    <p className="text-xs text-muted-foreground font-mono bg-muted/50 p-2 rounded">
+                      ✓ API key is configured (hidden for security)
                     </p>
                   </div>
                   <div>
@@ -541,16 +493,16 @@ export default function APISetup({
                       Created:
                     </label>
                     <p className="text-sm text-muted-foreground">
-                      {new Date(selectedKey.created_at).toLocaleString()}
+                      {new Date(key.created_at).toLocaleString()}
                     </p>
                   </div>
                   <div className="pt-4">
                     <Button
-                      onClick={() => testKey(selectedKey.id)}
-                      disabled={testingKeyId !== null}
+                      onClick={testKey}
+                      disabled={isTestingKey}
                       className="w-full flex items-center justify-center gap-2"
                     >
-                      {testingKeyId === selectedKey.id ? (
+                      {isTestingKey ? (
                         <PixelLoader
                           message="Testing..."
                           size="sm"
@@ -571,17 +523,11 @@ export default function APISetup({
                 <div className="text-center py-8">
                   <Key className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
                   <h4 className="text-lg font-semibold text-foreground mb-2">
-                    No Key Selected
+                    No Key Configured
                   </h4>
                   <p className="text-muted-foreground mb-4">
-                    Select an API key from the table to view details and test
-                    connectivity.
+                    Add your API key to view details and test connectivity.
                   </p>
-                  {keys.length > 0 && (
-                    <Button onClick={() => setSelectedKeyId(keys[0].id)}>
-                      Select First Key
-                    </Button>
-                  )}
                 </div>
               </Card>
             )}
@@ -601,7 +547,7 @@ export default function APISetup({
                 </p>
                 <p>
                   <strong>Status:</strong>{" "}
-                  {testingKeyId ? "Testing..." : "Ready"}
+                  {isTestingKey ? "Testing..." : "Ready"}
                 </p>
                 <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
                   <p className="text-sm text-blue-500">

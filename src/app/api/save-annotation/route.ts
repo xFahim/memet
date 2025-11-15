@@ -24,6 +24,7 @@ export async function POST(req: NextRequest) {
       context,
       domain,
       free_form,
+      markAsCompleted = true, // Default to true for backward compatibility
     } = body;
 
     if (!annotationId || !annotatorName) {
@@ -66,35 +67,43 @@ export async function POST(req: NextRequest) {
     // Check if this was the current in-progress annotation
     const wasInProgress = current.annotation_status === "in_progress";
 
-    // update fields + mark completed
+    // Prepare update object
+    const updateData: any = {
+      ocr_text,
+      image_description,
+      entity,
+      role: role || null,
+      role_explanation,
+      entity_2,
+      role_2: role_2 || null,
+      role_explanation_2,
+      humor_explanation,
+      context,
+      domain: domain || null,
+      free_form,
+    };
+
+    // Only mark as completed if markAsCompleted is true
+    if (markAsCompleted) {
+      updateData.annotation_status = "completed";
+      updateData.in_progress_at = null;
+    }
+    // Otherwise, keep it as in_progress (don't update status)
+
+    // update fields
     const { data: updated, error: updErr } = await supabase
       .from("annotations")
-      .update({
-        ocr_text,
-        image_description,
-        entity,
-        role: role || null,
-        role_explanation,
-        entity_2,
-        role_2: role_2 || null,
-        role_explanation_2,
-        humor_explanation,
-        context,
-        domain: domain || null,
-        free_form,
-        annotation_status: "completed",
-        in_progress_at: null,
-      })
+      .update(updateData)
       .eq("id", annotationId)
       .select()
       .single();
 
     if (updErr) throw updErr;
 
-    // Return whether the cursor should move (only if it was in_progress)
+    // Return whether the cursor should move (only if it was in_progress AND marked as completed)
     return NextResponse.json({
       updated,
-      movedCursor: wasInProgress,
+      movedCursor: wasInProgress && markAsCompleted,
     });
   } catch (err: any) {
     console.error(err);

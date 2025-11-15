@@ -4,24 +4,39 @@ import { supabaseAdmin } from "@/lib/supabase";
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { keyId } = body;
+    const { keyId, for_user } = body;
 
-    if (!keyId) {
+    // Support both keyId (for backward compatibility) and for_user
+    let keyData;
+    if (for_user) {
+      // Get the key by user
+      const { data, error: fetchError } = await (supabaseAdmin as any)
+        .from("geminikeys")
+        .select("id, name, key")
+        .eq("for_user", for_user)
+        .single();
+
+      if (fetchError || !data) {
+        return NextResponse.json({ error: "API key not found for this user" }, { status: 404 });
+      }
+      keyData = data;
+    } else if (keyId) {
+      // Get the key by ID (backward compatibility)
+      const { data, error: fetchError } = await (supabaseAdmin as any)
+        .from("geminikeys")
+        .select("id, name, key")
+        .eq("id", keyId)
+        .single();
+
+      if (fetchError || !data) {
+        return NextResponse.json({ error: "API key not found" }, { status: 404 });
+      }
+      keyData = data;
+    } else {
       return NextResponse.json(
-        { error: "Key ID is required" },
+        { error: "Either keyId or for_user is required" },
         { status: 400 }
       );
-    }
-
-    // Get the key from database
-    const { data: keyData, error: fetchError } = await (supabaseAdmin as any)
-      .from("geminikeys")
-      .select("id, name, key")
-      .eq("id", keyId)
-      .single();
-
-    if (fetchError || !keyData) {
-      return NextResponse.json({ error: "API key not found" }, { status: 404 });
     }
 
     // Test the key with a simple API call

@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createAIFillupService } from "@/lib/ai-fillup";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { imageUrl, context, apiKey } = body;
+    const { imageUrl, context, for_user } = body;
 
     if (!imageUrl) {
       return NextResponse.json(
@@ -20,14 +21,44 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!apiKey) {
+    if (!for_user) {
       return NextResponse.json(
-        { error: "API key is required" },
+        { error: "User name is required" },
         { status: 400 }
       );
     }
 
-    // Create AI service with the provided API key
+    // Fetch the API key from Supabase for this specific user
+    const { data: keyData, error: keyError } = await supabaseAdmin
+      .from("geminikeys")
+      .select("key")
+      .eq("for_user", for_user)
+      .single();
+
+    if (keyError || !keyData) {
+      return NextResponse.json(
+        { 
+          error: "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
+          code: "NO_API_KEY"
+        },
+        { status: 404 }
+      );
+    }
+
+    // Type assertion to help TypeScript understand the structure
+    const keyDataTyped = keyData as { key: string };
+    const apiKey = keyDataTyped.key;
+    if (!apiKey) {
+      return NextResponse.json(
+        { 
+          error: "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
+          code: "NO_API_KEY"
+        },
+        { status: 404 }
+      );
+    }
+
+    // Create AI service with the user's API key from database
     const aiService = createAIFillupService(apiKey);
 
     // Generate AI fillup data

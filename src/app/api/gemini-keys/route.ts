@@ -2,24 +2,41 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { Database } from "@/lib/database.types";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
-    const { data: keys, error } = await supabaseAdmin
+    const { searchParams } = new URL(request.url);
+    const forUser = searchParams.get("for_user");
+
+    if (!forUser) {
+      return NextResponse.json(
+        { error: "for_user parameter is required" },
+        { status: 400 }
+      );
+    }
+
+    // Get the key metadata for the specific user (DO NOT return the actual key value)
+    const { data: key, error } = await supabaseAdmin
       .from("geminikeys")
-      .select("*")
-      .order("created_at", { ascending: false });
+      .select("id, name, for_user, created_at")
+      .eq("for_user", forUser)
+      .single();
 
     if (error) {
-      console.error("Error fetching Gemini keys:", error);
+      // If no key found, return null instead of error
+      if (error.code === "PGRST116") {
+        return NextResponse.json({ key: null });
+      }
+      console.error("Error fetching Gemini key:", error);
       return NextResponse.json(
-        { error: "Failed to fetch API keys" },
+        { error: "Failed to fetch API key" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ keys });
+    // Return only metadata, never the actual key value
+    return NextResponse.json({ key });
   } catch (error) {
-    console.error("Unexpected error fetching keys:", error);
+    console.error("Unexpected error fetching key:", error);
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }
@@ -30,11 +47,11 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { name, key } = body;
+    const { name, key, for_user } = body;
 
-    if (!name || !key) {
+    if (!name || !key || !for_user) {
       return NextResponse.json(
-        { error: "Name and key are required" },
+        { error: "Name, key, and for_user are required" },
         { status: 400 }
       );
     }
@@ -50,24 +67,42 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Check if name already exists
+    // Check if a key already exists for this user
     const { data: existingKey } = await supabaseAdmin
       .from("geminikeys")
       .select("id")
-      .eq("name", name)
+      .eq("for_user", for_user)
       .single();
 
     if (existingKey) {
-      return NextResponse.json(
-        { error: "A key with this name already exists" },
-        { status: 409 }
-      );
+      // Update existing key instead of creating new one
+      const { data: updatedKey, error: updateError } = await (supabaseAdmin as any)
+        .from("geminikeys")
+        .update({
+          name: name.trim(),
+          key: key.trim(),
+        })
+        .eq("for_user", for_user)
+        .select()
+        .single();
+
+      if (updateError) {
+        console.error("Error updating Gemini key:", updateError);
+        return NextResponse.json(
+          { error: "Failed to update API key" },
+          { status: 500 }
+        );
+      }
+
+      return NextResponse.json({ key: updatedKey });
     }
 
+    // Create new key for user
     const { data: newKey, error } = await (supabaseAdmin as any)
       .from("geminikeys")
       .insert({
         name: name.trim(),
+        for_user: for_user.trim(),
         key: key.trim(),
       })
       .select()
@@ -94,11 +129,11 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, name, key } = body;
+    const { for_user, name, key } = body;
 
-    if (!id || !name || !key) {
+    if (!for_user || !name || !key) {
       return NextResponse.json(
-        { error: "ID, name and key are required" },
+        { error: "for_user, name and key are required" },
         { status: 400 }
       );
     }
@@ -114,28 +149,14 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Check if name already exists (excluding current key)
-    const { data: existingKey } = await supabaseAdmin
-      .from("geminikeys")
-      .select("id")
-      .eq("name", name)
-      .neq("id", id)
-      .single();
-
-    if (existingKey) {
-      return NextResponse.json(
-        { error: "A key with this name already exists" },
-        { status: 409 }
-      );
-    }
-
+    // Update the key for the user
     const { data: updatedKey, error } = await (supabaseAdmin as any)
       .from("geminikeys")
       .update({
         name: name.trim(),
         key: key.trim(),
       })
-      .eq("id", id)
+      .eq("for_user", for_user)
       .select()
       .single();
 
@@ -164,11 +185,11 @@ export async function PUT(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id } = body;
+    const { for_user } = body;
 
-    if (!id) {
+    if (!for_user) {
       return NextResponse.json(
-        { error: "Key ID is required" },
+        { error: "for_user is required" },
         { status: 400 }
       );
     }
@@ -176,7 +197,7 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabaseAdmin
       .from("geminikeys")
       .delete()
-      .eq("id", id);
+      .eq("for_user", for_user);
 
     if (error) {
       console.error("Error deleting Gemini key:", error);
