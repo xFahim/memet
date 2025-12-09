@@ -257,7 +257,9 @@ export default function APISetup({
           <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg max-w-md w-full">
             <div className="flex items-center gap-2">
               <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
-              <p className="text-sm text-red-500 font-medium break-words">{error}</p>
+              <p className="text-sm text-red-500 font-medium break-words">
+                {error}
+              </p>
             </div>
           </div>
         </div>
@@ -476,9 +478,7 @@ export default function APISetup({
                     <label className="text-sm font-medium text-foreground">
                       Name:
                     </label>
-                    <p className="text-foreground font-medium">
-                      {key.name}
-                    </p>
+                    <p className="text-foreground font-medium">{key.name}</p>
                   </div>
                   <div>
                     <label className="text-sm font-medium text-foreground">
@@ -543,7 +543,7 @@ export default function APISetup({
                   <strong>Provider:</strong> Google Gemini
                 </p>
                 <p>
-                  <strong>Model:</strong> gemini-2.0-flash-lite
+                  <strong>Model:</strong> gemini-2.5-flash
                 </p>
                 <p>
                   <strong>Status:</strong>{" "}

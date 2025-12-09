@@ -76,15 +76,13 @@ export async function POST(request: NextRequest) {
 
     if (existingKey) {
       // Update existing key instead of creating new one
-      const { data: updatedKey, error: updateError } = await (supabaseAdmin as any)
+      const { error: updateError } = await (supabaseAdmin as any)
         .from("geminikeys")
         .update({
           name: name.trim(),
           key: key.trim(),
         })
-        .eq("for_user", for_user)
-        .select()
-        .single();
+        .eq("for_user", for_user);
 
       if (updateError) {
         console.error("Error updating Gemini key:", updateError);
@@ -94,24 +92,50 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // Fetch and return only metadata (DO NOT return the actual key value)
+      const { data: updatedKey, error: fetchError } = await supabaseAdmin
+        .from("geminikeys")
+        .select("id, name, for_user, created_at")
+        .eq("for_user", for_user)
+        .single();
+
+      if (fetchError) {
+        console.error("Error fetching updated key:", fetchError);
+        return NextResponse.json(
+          { error: "Failed to fetch updated key" },
+          { status: 500 }
+        );
+      }
+
       return NextResponse.json({ key: updatedKey });
     }
 
     // Create new key for user
-    const { data: newKey, error } = await (supabaseAdmin as any)
-      .from("geminikeys")
-      .insert({
-        name: name.trim(),
-        for_user: for_user.trim(),
-        key: key.trim(),
-      })
-      .select()
-      .single();
+    const { error } = await (supabaseAdmin as any).from("geminikeys").insert({
+      name: name.trim(),
+      for_user: for_user.trim(),
+      key: key.trim(),
+    });
 
     if (error) {
       console.error("Error creating Gemini key:", error);
       return NextResponse.json(
         { error: "Failed to create API key" },
+        { status: 500 }
+      );
+    }
+
+    // Fetch and return only metadata (DO NOT return the actual key value)
+    const { data: newKey, error: fetchError } = await supabaseAdmin
+      .from("geminikeys")
+      .select("id, name, for_user, created_at")
+      .eq("for_user", for_user)
+      .single();
+
+    if (fetchError) {
+      console.error("Error fetching created key:", fetchError);
+      return NextResponse.json(
+        { error: "Failed to fetch created key" },
         { status: 500 }
       );
     }
@@ -150,20 +174,36 @@ export async function PUT(request: NextRequest) {
     }
 
     // Update the key for the user
-    const { data: updatedKey, error } = await (supabaseAdmin as any)
+    const { error } = await (supabaseAdmin as any)
       .from("geminikeys")
       .update({
         name: name.trim(),
         key: key.trim(),
       })
-      .eq("for_user", for_user)
-      .select()
-      .single();
+      .eq("for_user", for_user);
 
     if (error) {
       console.error("Error updating Gemini key:", error);
       return NextResponse.json(
         { error: "Failed to update API key" },
+        { status: 500 }
+      );
+    }
+
+    // Fetch and return only metadata (DO NOT return the actual key value)
+    const { data: updatedKey, error: fetchError } = await supabaseAdmin
+      .from("geminikeys")
+      .select("id, name, for_user, created_at")
+      .eq("for_user", for_user)
+      .single();
+
+    if (fetchError) {
+      if (fetchError.code === "PGRST116") {
+        return NextResponse.json({ error: "Key not found" }, { status: 404 });
+      }
+      console.error("Error fetching updated key:", fetchError);
+      return NextResponse.json(
+        { error: "Failed to fetch updated key" },
         { status: 500 }
       );
     }

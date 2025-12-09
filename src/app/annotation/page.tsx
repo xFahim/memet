@@ -599,6 +599,14 @@ function AnnotationPageContent() {
 
       // If saving from human form, switch to AI form tab
       if (formTab === "human") {
+        // Update apiResponse with the saved annotation data so AI form can display it
+        if (data.updated && apiResponse) {
+          setApiResponse({
+            ...apiResponse,
+            annotation: data.updated,
+          });
+        }
+
         // Don't reset form data - keep it for AI form
         // Don't clear selected annotation ID - stay on current annotation
         // Don't fetch next annotation - stay on current meme

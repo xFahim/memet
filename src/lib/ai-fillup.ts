@@ -64,7 +64,7 @@ export class AIFillupService {
 
       // Call Gemini API with image and context
       const response = await this.ai.models.generateContent({
-        model: "gemini-2.0-flash-lite",
+        model: "gemini-2.5-flash",
         contents: [
           {
             role: "user",

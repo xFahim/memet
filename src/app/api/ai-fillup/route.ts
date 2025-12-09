@@ -29,6 +29,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Fetch the API key from Supabase for this specific user
+    console.log(`[AI-FILLUP] Fetching key for user: ${for_user}`);
     const { data: keyData, error: keyError } = await supabaseAdmin
       .from("geminikeys")
       .select("key")
@@ -36,10 +37,15 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (keyError || !keyData) {
+      console.error(
+        `[AI-FILLUP] Key fetch error for user ${for_user}:`,
+        keyError
+      );
       return NextResponse.json(
-        { 
-          error: "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
-          code: "NO_API_KEY"
+        {
+          error:
+            "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
+          code: "NO_API_KEY",
         },
         { status: 404 }
       );
@@ -49,14 +55,18 @@ export async function POST(req: NextRequest) {
     const keyDataTyped = keyData as { key: string };
     const apiKey = keyDataTyped.key;
     if (!apiKey) {
+      console.error(`[AI-FILLUP] No key value found for user ${for_user}`);
       return NextResponse.json(
-        { 
-          error: "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
-          code: "NO_API_KEY"
+        {
+          error:
+            "No API key configured for this user. Please set up your Gemini API key in the API Setup tab first.",
+          code: "NO_API_KEY",
         },
         { status: 404 }
       );
     }
+
+    console.log(`[AI-FILLUP] Using API key for user: ${for_user}`);
 
     // Create AI service with the user's API key from database
     const aiService = createAIFillupService(apiKey);

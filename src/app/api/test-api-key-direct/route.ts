@@ -1,57 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/lib/supabase";
 import { GoogleGenAI } from "@google/genai";
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { for_user } = body;
+    const { apiKey } = body;
 
-    // Require for_user to ensure we're testing the correct user's key
-    if (!for_user) {
+    if (!apiKey) {
       return NextResponse.json(
-        { error: "for_user parameter is required" },
+        { error: "API key is required" },
         { status: 400 }
       );
     }
 
-    // Get the key by user - this ensures we only test keys for the specified user
-    console.log(`[TEST-KEY] Fetching key for user: ${for_user}`);
-    const { data: keyData, error: fetchError } = await (supabaseAdmin as any)
-      .from("geminikeys")
-      .select("id, name, key")
-      .eq("for_user", for_user)
-      .single();
-
-    if (fetchError || !keyData) {
-      console.error(
-        `[TEST-KEY] Key fetch error for user ${for_user}:`,
-        fetchError
-      );
+    // Validate key format (basic validation)
+    if (!apiKey.startsWith("AIza") || apiKey.length < 30) {
       return NextResponse.json(
-        { error: "API key not found for this user" },
-        { status: 404 }
+        {
+          error:
+            "Invalid API key format. Gemini keys should start with 'AIza' and be at least 30 characters long.",
+        },
+        { status: 400 }
       );
     }
 
-    // DEBUG: Log the key being used (first 10 chars only for security)
     console.log(
-      `[TEST-KEY] Using API key for user ${for_user}: ${keyData.key.substring(
+      `[TEST-API-KEY-DIRECT] Testing API key: ${apiKey.substring(
         0,
         10
-      )}...${keyData.key.substring(keyData.key.length - 4)}`
+      )}...${apiKey.substring(apiKey.length - 4)}`
     );
 
     // Test the key using GoogleGenAI SDK
     try {
       const ai = new GoogleGenAI({
-        apiKey: keyData.key,
+        apiKey: apiKey,
       });
 
       const response = await ai.models.generateContent({
         model: "gemini-2.5-flash",
-        contents:
-          "Hi, are you there? Please respond with just 'Yes, I am working!'",
+        contents: "Explain how AI works in a few words",
       });
 
       const responseText = response.text;
@@ -59,8 +47,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         message: `✅ API key is working! Response: "${responseText}"`,
         success: true,
-        keyName: keyData.name,
         response: responseText,
+        model: "gemini-2.5-flash",
+        keyPreview: `${apiKey.substring(0, 10)}...${apiKey.substring(
+          apiKey.length - 4
+        )}`,
       });
     } catch (apiError: any) {
       console.error("Gemini API test error:", apiError);
@@ -76,7 +67,9 @@ export async function POST(request: NextRequest) {
       ) {
         return NextResponse.json(
           {
-            error: "Invalid API key format",
+            error: "Invalid API key format or key is invalid",
+            details: errorMessage,
+            errorCode: errorCode,
           },
           { status: 400 }
         );
@@ -84,6 +77,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error: "API key does not have permission to access Gemini API",
+            details: errorMessage,
+            errorCode: errorCode,
           },
           { status: 403 }
         );
@@ -95,6 +90,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json(
           {
             error: "API quota exceeded or rate limited",
+            details: errorMessage,
+            errorCode: errorCode,
           },
           { status: 429 }
         );
@@ -103,20 +100,30 @@ export async function POST(request: NextRequest) {
         errorMessage.includes("fetch")
       ) {
         return NextResponse.json(
-          { error: "Network error: Unable to connect to Gemini API" },
+          {
+            error: "Network error: Unable to connect to Gemini API",
+            details: errorMessage,
+          },
           { status: 503 }
         );
       } else {
         return NextResponse.json(
-          { error: `API test failed: ${errorMessage}` },
+          {
+            error: `API test failed: ${errorMessage}`,
+            details: errorMessage,
+            errorCode: errorCode,
+          },
           { status: 500 }
         );
       }
     }
-  } catch (error) {
+  } catch (error: any) {
     console.error("Unexpected error testing key:", error);
     return NextResponse.json(
-      { error: "Internal server error" },
+      {
+        error: "Internal server error",
+        details: error.message,
+      },
       { status: 500 }
     );
   }
